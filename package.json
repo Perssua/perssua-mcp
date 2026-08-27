@@ -1,0 +1,38 @@
+{
+  "name": "@perssua/mcp",
+  "version": "0.1.0",
+  "description": "Official Perssua MCP server \u2014 lets Claude, ChatGPT, Grok and other MCP clients start Perssua sessions with a configured assistant and context.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Perssua",
+  "homepage": "https://perssua.com/docs/integrations",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Perssua/perssua-mcp.git"
+  },
+  "bugs": {
+    "email": "help@perssua.com"
+  },
+  "bin": {
+    "perssua-mcp": "bin/perssua-mcp.js"
+  },
+  "main": "src/server.js",
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node bin/perssua-mcp.js",
+    "start:http": "node bin/perssua-mcp.js --http",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.27.1",
+    "zod": "^3.25.0"
+  }
+}

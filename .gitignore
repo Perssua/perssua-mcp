@@ -1,0 +1,4 @@
+node_modules/
+*.mcpb
+*.tgz
+.DS_Store
