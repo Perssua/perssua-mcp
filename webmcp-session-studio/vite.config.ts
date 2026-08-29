@@ -7,5 +7,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    pool: "vmForks",
+    maxWorkers: 1,
+    fileParallelism: false,
   },
 });

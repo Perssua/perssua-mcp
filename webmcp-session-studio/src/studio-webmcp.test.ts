@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { StudioSetupStore } from "./studio-brief";
-import { createStudioTools, STUDIO_TOOL_NAMES, STUDIO_TOOL_SCHEMAS } from "./studio-webmcp";
+import {
+  createStudioTools,
+  STUDIO_TOOL_NAMES,
+  STUDIO_TOOL_OUTPUT_MAX_CHARACTERS,
+  STUDIO_TOOL_SCHEMAS,
+} from "./studio-webmcp";
 
 async function call(name: (typeof STUDIO_TOOL_NAMES)[number], input: unknown) {
   const tool = createStudioTools(new StudioSetupStore()).find((candidate) => candidate.name === name);
@@ -42,5 +47,17 @@ describe("Studio WebMCP create proposal boundary", () => {
     expect(staged).toMatchObject({ ok: true, staged: true });
     expect(staged).not.toHaveProperty("opened");
     expect(staged).not.toHaveProperty("submitted");
+  });
+
+  it("paginates JSON-escaped text within the tool output budget", async () => {
+    const store = new StudioSetupStore();
+    store.updateHuman("knowledgeNotes", "\n".repeat(900));
+    const inspect = createStudioTools(store).find((tool) => tool.name === "inspect_studio_setup");
+    if (!inspect) throw new Error("Missing inspect_studio_setup");
+    const output = await inspect.execute({ section: "knowledgeNotes" });
+    const parsed = JSON.parse(output);
+    expect(output.length).toBeLessThanOrEqual(STUDIO_TOOL_OUTPUT_MAX_CHARACTERS);
+    expect(parsed.value.length).toBeLessThan(900);
+    expect(parsed.nextOffset).toBe(parsed.value.length);
   });
 });

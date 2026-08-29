@@ -16,7 +16,6 @@ import {
 import {
   useEffect,
   useMemo,
-  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -73,8 +72,16 @@ const STUDIO_LOCALE_COPY: Record<StudioLocale, {
 }> = {
   en: { language: "Language", studio: "Session Studio", staysHere: "Setup stays in this tab", draft: "Draft your new assistant", review: "Review the proposal", continue: "Continue", cta: "Create assistant and start session" },
   pt: { language: "Idioma", studio: "Studio de sessão", staysHere: "A configuração fica nesta aba", draft: "Crie o assistente", review: "Revise a proposta", continue: "Continuar", cta: "Criar assistente e iniciar sessão" },
-  es: { language: "Idioma", studio: "Studio de sesión", staysHere: "Redacta el asistente", draft: "Redacta el asistente", review: "Revisa la propuesta", continue: "Continuar", cta: "Crear asistente e iniciar la sesión" },
+  es: { language: "Idioma", studio: "Studio de sesión", staysHere: "La configuración permanece en esta pestaña", draft: "Redacta el asistente", review: "Revisa la propuesta", continue: "Continuar", cta: "Crear asistente e iniciar la sesión" },
 };
+
+export function isStudioStepComplete(
+  step: { id: StudioStep },
+  currentStep: StudioStep,
+  highestStep: StudioStep,
+): boolean {
+  return step.id < highestStep && step.id !== currentStep;
+}
 
 function initialStudioLocale(): StudioLocale {
   const value = new URLSearchParams(window.location.search).get("lang");
@@ -382,7 +389,6 @@ export function App() {
   const [webMcpStatus, setWebMcpStatus] = useState<WebMcpStatus>("checking");
   const [proposalReviewed, setProposalReviewed] = useState(false);
   const [locale, setLocale] = useState<StudioLocale>(initialStudioLocale);
-  const completedSteps = useRef(new Set<StudioStep>());
   const setup = snapshot.setup;
   const currentStep = snapshot.currentStep;
   const highestStep = snapshot.highestStep;
@@ -420,12 +426,6 @@ export function App() {
   }, [store]);
 
   useEffect(() => {
-    if (currentStep === 1 && highestStep === 1) {
-      completedSteps.current.clear();
-    }
-  }, [currentStep, highestStep]);
-
-  useEffect(() => {
     setProposalReviewed(false);
   }, [setup.assistantName, setup.assistantInstructions, setup.assistantCategory, setup.sessionGoal]);
 
@@ -446,7 +446,6 @@ export function App() {
 
   const continueWizard = () => {
     if (!canContinue || currentStep >= 5) return;
-    completedSteps.current.add(currentStep);
     store.advanceToNextStepFromHuman();
   };
 
@@ -519,7 +518,7 @@ export function App() {
           <nav className="step-list" aria-label="Studio setup progress">
             {STUDIO_STEPS.map((step) => {
               const active = step.id === currentStep;
-              const completed = completedSteps.current.has(step.id);
+              const completed = isStudioStepComplete(step, currentStep, highestStep);
               const available = step.id <= highestStep;
               return (
                 <button

@@ -7,7 +7,7 @@
   "author": "MONTANO PRODUCTIONS B.V.",
   "type": "module",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=20.19.0 <25"
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",

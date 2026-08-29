@@ -235,9 +235,9 @@ function inspectSetup(
   }
 
   const text = snapshot.setup[section];
-  const value = text.slice(offset, offset + STUDIO_INSPECT_TEXT_CHUNK_CHARACTERS);
-  const nextOffset = offset + value.length;
-  return {
+  let nextOffset = Math.min(offset + STUDIO_INSPECT_TEXT_CHUNK_CHARACTERS, text.length);
+  let value = text.slice(offset, nextOffset);
+  let response = {
     ok: true,
     section,
     revision: snapshot.revision,
@@ -246,6 +246,20 @@ function inspectSetup(
     value,
     nextOffset: nextOffset < text.length ? nextOffset : null,
   };
+
+  // JSON escaping can make 900 visible characters exceed the tool budget.
+  // Shrink the page before returning instead of throwing from result().
+  while (value && JSON.stringify(response).length > STUDIO_TOOL_OUTPUT_MAX_CHARACTERS) {
+    nextOffset -= 1;
+    value = text.slice(offset, nextOffset);
+    response = {
+      ...response,
+      value,
+      nextOffset: nextOffset < text.length ? nextOffset : null,
+    };
+  }
+
+  return response;
 }
 
 const ASSISTANT_PROPOSAL_FIELDS: StudioTextField[] = [
