@@ -29,7 +29,7 @@
   "scripts": {
     "start": "node bin/perssua-mcp.js",
     "start:http": "node bin/perssua-mcp.js --http",
-    "test": "node --test"
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.27.1",
