@@ -100,3 +100,26 @@ What this MCP server does with data, specifically:
 
 See `../claude`, `../chatgpt`, and `../grok` for per-client setup, and
 `../../docs/integrations.md` for the full protocol reference.
+
+## WebMCP Session Studio challenge source
+
+[`webmcp-session-studio/`](./webmcp-session-studio/) is the public, standalone
+source for the Perssua WebMCP Session Studio. Its five-step wizard exposes
+exactly five browser-scoped tools through
+`document.modelContext.registerTool(...)`, keeps every agent mutation visible
+in an append-only ledger, and makes the final `perssua://` handoff a human-only
+action. The create-only new-assistant handoff is an untrusted
+proposal that the Perssua app must validate and present for confirmation; the
+browser tools never create anything. In the final **Start the session** step,
+the human uses **Create assistant and start session**; Perssua opens and
+pre-fills the session without sending the message.
+
+The WebMCP Challenge legal entrant is **MONTANO PRODUCTIONS B.V.**; Perssua is
+the product/project name. Director **Sara Ennes da Silva** is the authorized
+WebMCP Challenge submitter/signatory. The public contact email remains pending
+and is maintained privately until publication is explicitly authorized.
+
+The Studio is independent from this Node MCP server and can be demonstrated
+without the Perssua desktop app installed. See [`WEBMCP_CHALLENGE.md`](./WEBMCP_CHALLENGE.md)
+for challenge-window scope, security decisions, testing, compatibility, and the
+mapping to the production `https://perssua.com/studio` route.
