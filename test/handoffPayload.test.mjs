@@ -209,20 +209,21 @@ test('buildHandoffPayload warns when native assistant prompts are truncated', ()
   assert.ok(warnings.some((warning) => warning.includes('email prompt truncated')));
 });
 
-test('legacy prompt projection preserves the complete first prompt before the session goal', () => {
+test('legacy prompt projection never silently drops the session goal', () => {
   const firstPrompt = 'p'.repeat(HANDOFF_LIMITS.promptChars);
   const sessionGoal = 'g'.repeat(HANDOFF_LIMITS.sessionGoalChars);
-
-  assert.equal(
-    buildLegacyPromptProjection(firstPrompt, sessionGoal, HANDOFF_LIMITS.promptChars),
+  const oversizedProjection = buildLegacyPromptProjection(
     firstPrompt,
+    sessionGoal,
   );
+  assert.match(oversizedProjection, /^Session goal: g+/);
+  assert.ok(oversizedProjection.endsWith(firstPrompt));
+  assert.ok(oversizedProjection.length > HANDOFF_LIMITS.promptChars);
 
   const shortPrompt = 'Start with the highest-risk assumption.';
   const projection = buildLegacyPromptProjection(
     shortPrompt,
     'Compare two research directions.',
-    HANDOFF_LIMITS.promptChars,
   );
   assert.match(projection, /^Session goal: Compare two research directions\./);
   assert.ok(projection.endsWith(shortPrompt));

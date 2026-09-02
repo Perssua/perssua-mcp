@@ -40,7 +40,7 @@ const truncateString = (value, maxChars) => {
   return { value: str.slice(0, maxChars), truncated: true };
 };
 
-export const buildLegacyPromptProjection = (prompt, sessionGoal, maxChars) => {
+export const buildLegacyPromptProjection = (prompt, sessionGoal) => {
   if (!sessionGoal) return prompt;
   const goalProjection = `Session goal: ${sessionGoal}`;
   if (
@@ -50,13 +50,8 @@ export const buildLegacyPromptProjection = (prompt, sessionGoal, maxChars) => {
   ) {
     return prompt;
   }
-  if (!prompt) return truncateString(goalProjection, maxChars).value;
-
-  // Preserve the explicit first message before projecting the additive goal
-  // for older desktop clients that only understand the v1 prompt field.
-  const goalBudget = maxChars - prompt.length - '\n\n'.length - 'Session goal: '.length;
-  if (goalBudget <= 0) return prompt;
-  return `Session goal: ${sessionGoal.slice(0, goalBudget)}\n\n${prompt}`;
+  if (!prompt) return goalProjection;
+  return `${goalProjection}\n\n${prompt}`;
 };
 
 const looksBinary = (buffer) => {

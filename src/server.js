@@ -300,8 +300,17 @@ export const createPerssuaMcpServer = ({
       const sessionScopedPrompt = buildLegacyPromptProjection(
         firstPrompt || '',
         String(sessionGoal || '').trim(),
-        HANDOFF_LIMITS.promptChars,
       );
+
+      if (sessionScopedPrompt.length > HANDOFF_LIMITS.promptChars) {
+        return textResult(
+          [
+            `The session goal plus first prompt exceeds the ${HANDOFF_LIMITS.promptChars}-character compatibility limit.`,
+            'Shorten either field and retry. Nothing was written or truncated.',
+          ],
+          { isError: true },
+        );
+      }
 
       if (!bridge.found) {
         return textResult(
