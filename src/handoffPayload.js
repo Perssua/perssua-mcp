@@ -23,6 +23,10 @@ export const HANDOFF_LIMITS = {
   assistantNameChars: 200,
   assistantInstructionsChars: 32000,
   assistantCategoryChars: 64,
+  assistantRealtimePromptChars: 32000,
+  assistantFollowUpPromptChars: 32000,
+  assistantEmailPromptChars: 32000,
+  sessionGoalChars: 16000,
   sourceChars: 32,
   fileNameChars: 200,
   fileContentChars: 256000,
@@ -34,6 +38,20 @@ const truncateString = (value, maxChars) => {
   const str = String(value ?? '');
   if (str.length <= maxChars) return { value: str, truncated: false };
   return { value: str.slice(0, maxChars), truncated: true };
+};
+
+export const buildLegacyPromptProjection = (prompt, sessionGoal) => {
+  if (!sessionGoal) return prompt;
+  const goalProjection = `Session goal: ${sessionGoal}`;
+  if (
+    prompt === goalProjection
+    || prompt.startsWith(`${goalProjection}\n\n`)
+    || prompt.startsWith(`${goalProjection}\r\n\r\n`)
+  ) {
+    return prompt;
+  }
+  if (!prompt) return goalProjection;
+  return `${goalProjection}\n\n${prompt}`;
 };
 
 const looksBinary = (buffer) => {
@@ -95,6 +113,7 @@ export const buildHandoffPayload = ({
   newAssistant = null,
   prompt = '',
   context = '',
+  sessionGoal = '',
   files = [],
   autoSubmit = false,
   source = 'mcp',
@@ -122,16 +141,41 @@ export const buildHandoffPayload = ({
         String(newAssistant.category || '').trim(),
         limits.assistantCategoryChars,
       );
+      const realtimePrompt = truncateString(
+        newAssistant.realtimePrompt,
+        limits.assistantRealtimePromptChars,
+      );
+      const followUpPrompt = truncateString(
+        newAssistant.followUpPrompt,
+        limits.assistantFollowUpPromptChars,
+      );
+      const emailPrompt = truncateString(
+        newAssistant.emailPrompt,
+        limits.assistantEmailPromptChars,
+      );
       payload.newAssistant = {
         name: name.value,
         instructions: instructions.value,
         ...(category.value ? { category: category.value } : {}),
+        ...(String(newAssistant.realtimePrompt || '').trim() ? { realtimePrompt: realtimePrompt.value } : {}),
+        ...(String(newAssistant.followUpPrompt || '').trim() ? { followUpPrompt: followUpPrompt.value } : {}),
+        ...(String(newAssistant.emailPrompt || '').trim() ? { emailPrompt: emailPrompt.value } : {}),
+        ...(newAssistant.requireCertainty !== undefined ? { requireCertainty: newAssistant.requireCertainty === true } : {}),
       };
       if (name.truncated) warnings.push('assistant name truncated');
       if (instructions.truncated) {
         warnings.push(`assistant instructions truncated to ${limits.assistantInstructionsChars} characters`);
       }
       if (category.truncated) warnings.push('assistant category truncated');
+      if (realtimePrompt.truncated) {
+        warnings.push(`assistant realtime prompt truncated to ${limits.assistantRealtimePromptChars} characters`);
+      }
+      if (followUpPrompt.truncated) {
+        warnings.push(`assistant follow-up prompt truncated to ${limits.assistantFollowUpPromptChars} characters`);
+      }
+      if (emailPrompt.truncated) {
+        warnings.push(`assistant email prompt truncated to ${limits.assistantEmailPromptChars} characters`);
+      }
     } else {
       warnings.push('newAssistant ignored — it needs both a name and instructions');
     }
@@ -156,6 +200,12 @@ export const buildHandoffPayload = ({
     const { value, truncated } = truncateString(String(context), limits.contextChars);
     payload.context = value;
     if (truncated) warnings.push(`context truncated to ${limits.contextChars} characters`);
+  }
+
+  if (sessionGoal && String(sessionGoal).trim()) {
+    const { value, truncated } = truncateString(String(sessionGoal).trim(), limits.sessionGoalChars);
+    payload.sessionGoal = value;
+    if (truncated) warnings.push(`session goal truncated to ${limits.sessionGoalChars} characters`);
   }
 
   const inlined = [];

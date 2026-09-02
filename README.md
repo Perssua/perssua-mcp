@@ -41,14 +41,14 @@ node bin/perssua-mcp.js --http 8433
 | `app_status` | Is Perssua installed / running on this machine, where, and which handoff capabilities the installed build advertises. |
 | `list_assistants` | Lists the user's assistants (name + id) from the app's roster snapshot. |
 | `start_session` | Writes a handoff (assistant, prompt, context, text files, autoSubmit) and launches the app via `perssua://session/start?handoff=<id>`. Local mode only. |
-| `create_assistant` | Creates a new custom assistant (name + instructions, optional category/knowledge/files) and opens a session with it. The tool guides the client to interview the user first; knowledge becomes the assistant's permanent context. Local mode only, handoff channel only. |
+| `create_assistant` | Creates a custom assistant with its system prompt plus optional Notch, follow-up, summary, certainty, category, and permanent knowledge settings, then opens a session. `sessionGoal` stays at the top level of that first-session handoff and is never saved as assistant knowledge; it is also projected into the legacy first prompt. The handoff always includes the legacy name/instructions/category projection, so older compatible desktops create the basic assistant and ignore optional extensions. Local mode only, handoff channel only. |
 | `create_session_link` | Returns a clickable `perssua://session/start?...` link (plus an https launcher link when `PERSSUA_LAUNCH_URL` is set). For hosted/remote connectors. |
 
 There is also one MCP prompt, `new_assistant` — a guided interview (goal → style → knowledge → kickoff) that ends by calling `create_assistant`. In Claude Code it surfaces as `/mcp__perssua__new_assistant`.
 
 ### Version compatibility
 
-The app advertises its handoff capabilities in `~/.perssua/bridge.json` (`capabilities`, e.g. `["session-start", "session-files", "create-assistant"]`). `create_assistant` refuses with an update-the-app message when the installed build does not advertise `create-assistant` — older intakes would silently drop the field. Bridges written by builds that predate the capabilities field advertise none.
+The app advertises its handoff capabilities in `~/.perssua/bridge.json` (`capabilities`, e.g. `["session-start", "session-files", "create-assistant", "create-assistant-extended-prompts"]`). `create_assistant` refuses only when the installed build cannot create assistants at all. Its v1 handoff projection always contains `newAssistant.name`, `newAssistant.instructions`, and optional `newAssistant.category`; optional Notch/follow-up/summary/certainty fields are additive. Older compatible desktops ignore those extensions and create the reviewed basic assistant, while newer ones apply them. `create-assistant-extended-prompts` is informational and is not required to send the backward-compatible payload. Bridges written by builds that predate the capabilities field advertise none.
 
 ## Environment variables
 

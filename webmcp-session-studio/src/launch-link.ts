@@ -3,12 +3,17 @@ export const PERSSUA_SESSION_PARAM_LIMITS = {
   assistantName: 200,
   assistantInstructions: 4_000,
   assistantCategory: 64,
+  assistantRealtimePrompt: 4_000,
+  assistantFollowUpPrompt: 4_000,
+  assistantEmailPrompt: 4_000,
+  assistantRequireCertainty: 5,
+  sessionGoal: 2_000,
   prompt: 4_000,
   context: 8_000,
   source: 8_000,
 } as const;
 
-const ALLOWED_PARAMS = [
+export const LEGACY_CREATE_PARAMS = [
   "mode",
   "assistantName",
   "assistantInstructions",
@@ -16,6 +21,23 @@ const ALLOWED_PARAMS = [
   "prompt",
   "context",
   "source",
+] as const;
+
+/**
+ * These keys extend the v1 create proposal. Legacy Electron builds ignore
+ * them, while every link still contains the complete v1 projection above.
+ */
+export const CREATE_EXTENSION_PARAMS = [
+  "assistantRealtimePrompt",
+  "assistantFollowUpPrompt",
+  "assistantEmailPrompt",
+  "assistantRequireCertainty",
+  "sessionGoal",
+] as const;
+
+const ALLOWED_PARAMS = [
+  ...LEGACY_CREATE_PARAMS,
+  ...CREATE_EXTENSION_PARAMS,
 ] as const;
 
 export type PerssuaSessionParam = (typeof ALLOWED_PARAMS)[number];
@@ -93,6 +115,20 @@ export function buildPerssuaSessionDeepLinkStrict(
         code: "field_too_long",
         field: key,
         error: `${key} exceeds its ${PERSSUA_SESSION_PARAM_LIMITS[key].toLocaleString()} character limit.`,
+      };
+    }
+    if (
+      key === "assistantRequireCertainty" &&
+      value !== "true" &&
+      value !== "false" &&
+      value !== "1" &&
+      value !== "0"
+    ) {
+      return {
+        ok: false,
+        code: "invalid_parameter",
+        field: key,
+        error: "assistantRequireCertainty must be true, false, 1, or 0.",
       };
     }
   }

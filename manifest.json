@@ -45,7 +45,7 @@
     },
     {
       "name": "create_assistant",
-      "description": "Create a new custom Perssua assistant (name, instructions, knowledge) and open a session with it."
+      "description": "Create a new custom Perssua assistant with a legacy-compatible name/instructions projection, optional native prompts, permanent knowledge, and a separate first-session context."
     },
     {
       "name": "create_session_link",
@@ -56,7 +56,7 @@
     {
       "name": "new_assistant",
       "description": "Guided interview that designs a new Perssua assistant and creates it.",
-      "text": "Interview me about the assistant I need (goal, style, knowledge, kickoff), then call create_assistant."
+      "text": "Interview me about the assistant I need (goal, style, native prompts, permanent knowledge, first-session context, kickoff), then call create_assistant."
     }
   ],
   "compatibility": {

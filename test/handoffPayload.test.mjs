@@ -8,11 +8,25 @@ import {
   HANDOFF_ID_PATTERN,
   HANDOFF_LIMITS,
   buildHandoffPayload,
+  buildLegacyPromptProjection,
   inlineFile,
   writeHandoffFile,
 } from '../src/handoffPayload.js';
 
 const makeTempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'perssua-mcp-test-'));
+
+// Frozen v1 desktop projection: native extension keys must never be required
+// to create the basic assistant.
+const parseFrozenLegacyNewAssistant = (payload) => {
+  if (payload?.version !== 1 || !payload.newAssistant?.name || !payload.newAssistant?.instructions) {
+    return null;
+  }
+  return {
+    name: payload.newAssistant.name,
+    instructions: payload.newAssistant.instructions,
+    ...(payload.newAssistant.category ? { category: payload.newAssistant.category } : {}),
+  };
+};
 
 test('buildHandoffPayload produces a valid, capped payload', () => {
   const { payload, warnings } = buildHandoffPayload({
@@ -131,6 +145,37 @@ test('buildHandoffPayload carries a new-assistant spec and drops the assistant r
   assert.deepEqual(warnings, []);
 });
 
+test('buildHandoffPayload keeps assistant-wide behavior separate from a top-level session goal', () => {
+  const { payload } = buildHandoffPayload({
+    newAssistant: {
+      name: 'Meeting guide',
+      instructions: 'Be concise.',
+      realtimePrompt: 'Write only the next sentence ME can say.',
+      followUpPrompt: 'Offer three questions.',
+      emailPrompt: 'Summarize owners and decisions.',
+      requireCertainty: true,
+    },
+    context: 'Permanent product vocabulary',
+    sessionGoal: 'Plan the pricing review.',
+  });
+
+  assert.deepEqual(payload.newAssistant, {
+    name: 'Meeting guide',
+    instructions: 'Be concise.',
+    realtimePrompt: 'Write only the next sentence ME can say.',
+    followUpPrompt: 'Offer three questions.',
+    emailPrompt: 'Summarize owners and decisions.',
+    requireCertainty: true,
+  });
+  assert.equal(payload.context, 'Permanent product vocabulary');
+  assert.equal(payload.sessionGoal, 'Plan the pricing review.');
+  assert.equal(payload.version, 1);
+  assert.deepEqual(parseFrozenLegacyNewAssistant(payload), {
+    name: 'Meeting guide',
+    instructions: 'Be concise.',
+  });
+});
+
 test('buildHandoffPayload truncates oversized new-assistant fields with warnings', () => {
   const { payload, warnings } = buildHandoffPayload({
     newAssistant: {
@@ -143,6 +188,45 @@ test('buildHandoffPayload truncates oversized new-assistant fields with warnings
   assert.equal(payload.newAssistant.instructions.length, HANDOFF_LIMITS.assistantInstructionsChars);
   assert.ok(warnings.some((warning) => warning.includes('assistant name truncated')));
   assert.ok(warnings.some((warning) => warning.includes('instructions truncated')));
+});
+
+test('buildHandoffPayload warns when native assistant prompts are truncated', () => {
+  const { payload, warnings } = buildHandoffPayload({
+    newAssistant: {
+      name: 'Coach',
+      instructions: 'Be concise.',
+      realtimePrompt: 'r'.repeat(HANDOFF_LIMITS.assistantRealtimePromptChars + 1),
+      followUpPrompt: 'f'.repeat(HANDOFF_LIMITS.assistantFollowUpPromptChars + 1),
+      emailPrompt: 'e'.repeat(HANDOFF_LIMITS.assistantEmailPromptChars + 1),
+    },
+  });
+
+  assert.equal(payload.newAssistant.realtimePrompt.length, HANDOFF_LIMITS.assistantRealtimePromptChars);
+  assert.equal(payload.newAssistant.followUpPrompt.length, HANDOFF_LIMITS.assistantFollowUpPromptChars);
+  assert.equal(payload.newAssistant.emailPrompt.length, HANDOFF_LIMITS.assistantEmailPromptChars);
+  assert.ok(warnings.some((warning) => warning.includes('realtime prompt truncated')));
+  assert.ok(warnings.some((warning) => warning.includes('follow-up prompt truncated')));
+  assert.ok(warnings.some((warning) => warning.includes('email prompt truncated')));
+});
+
+test('legacy prompt projection never silently drops the session goal', () => {
+  const firstPrompt = 'p'.repeat(HANDOFF_LIMITS.promptChars);
+  const sessionGoal = 'g'.repeat(HANDOFF_LIMITS.sessionGoalChars);
+  const oversizedProjection = buildLegacyPromptProjection(
+    firstPrompt,
+    sessionGoal,
+  );
+  assert.match(oversizedProjection, /^Session goal: g+/);
+  assert.ok(oversizedProjection.endsWith(firstPrompt));
+  assert.ok(oversizedProjection.length > HANDOFF_LIMITS.promptChars);
+
+  const shortPrompt = 'Start with the highest-risk assumption.';
+  const projection = buildLegacyPromptProjection(
+    shortPrompt,
+    'Compare two research directions.',
+  );
+  assert.match(projection, /^Session goal: Compare two research directions\./);
+  assert.ok(projection.endsWith(shortPrompt));
 });
 
 test('buildHandoffPayload ignores new-assistant specs missing name or instructions', () => {
