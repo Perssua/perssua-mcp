@@ -4,6 +4,7 @@ import {
   compileStudioContext,
   compileStudioPrompt,
   EMPTY_STUDIO_SETUP,
+  getOpeningPromptLimit,
   StudioSetupStore,
 } from "./studio-brief";
 
@@ -72,6 +73,23 @@ describe("create-only Studio setup", () => {
       code: "prompt_too_long",
       field: "openingPrompt",
     });
+  });
+
+  it("exposes the exact remaining first-message budget for the current goal", () => {
+    const sessionGoal = "Reach a clear research finding";
+    const openingPromptLimit = getOpeningPromptLimit(sessionGoal);
+    const setup = {
+      ...completeSetup,
+      sessionGoal,
+      openingPrompt: "p".repeat(openingPromptLimit),
+    };
+
+    expect(compileStudioPrompt(setup).length).toBe(4_000);
+    expect(buildStudioHandoff(setup)).toMatchObject({ ok: true });
+    expect(buildStudioHandoff({
+      ...setup,
+      openingPrompt: `${setup.openingPrompt}p`,
+    })).toMatchObject({ ok: false, code: "prompt_too_long" });
   });
 
   it("keeps human edits out of the ledger and makes reset auditable", () => {

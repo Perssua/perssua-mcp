@@ -1,6 +1,7 @@
 import {
   buildStudioHandoff,
   isAssistantDefinitionReady,
+  getOpeningPromptLimit,
   STUDIO_FIELD_LIMITS,
   type StudioSetupStore,
   type StudioAgentPatch,
@@ -147,7 +148,7 @@ export const STUDIO_TOOL_SCHEMAS = {
         minLength: 1,
         maxLength: STUDIO_FIELD_LIMITS.openingPrompt,
         description:
-          "First message staged for human review; never submitted automatically.",
+          "First message staged for human review; never submitted automatically. Its effective limit is the remaining 4,000-character prompt budget after the current sessionGoal and compatibility labels; inspect the summary for openingPromptLimit.",
       },
     },
     required: ["openingPrompt"],
@@ -204,6 +205,7 @@ function setupReceipt(store: StudioSetupStore) {
       sessionGoal: snapshot.setup.sessionGoal.length,
       knowledgeNotes: snapshot.setup.knowledgeNotes.length,
       openingPrompt: snapshot.setup.openingPrompt.length,
+      openingPromptLimit: getOpeningPromptLimit(snapshot.setup.sessionGoal),
     },
     agentChangeCount: snapshot.agentChanges.length,
   };
@@ -390,6 +392,13 @@ export function createStudioTools(
           patch.requireCertainty = input.requireCertainty;
         }
         const proposedSetup = { ...store.getSnapshot().setup, ...patch };
+        const openingPromptLimit = getOpeningPromptLimit(proposedSetup.sessionGoal);
+        if (proposedSetup.openingPrompt.length > openingPromptLimit) {
+          return {
+            ok: false,
+            error: `The existing openingPrompt exceeds the ${openingPromptLimit.toLocaleString()} characters available with this sessionGoal. Shorten one of them first.`,
+          };
+        }
         const change = store.updateFromAgent(
           "define_assistant",
           patch,
@@ -445,16 +454,19 @@ export function createStudioTools(
       inputSchema: STUDIO_TOOL_SCHEMAS.prepare_first_session,
       annotations: { readOnlyHint: false, untrustedContentHint: true },
       execute: run("prepare_first_session", (input) => {
+        const openingPromptLimit = getOpeningPromptLimit(
+          store.getSnapshot().setup.sessionGoal,
+        );
         if (
           !isRecord(input) ||
           !hasOnlyKeys(input, ["openingPrompt"]) ||
           typeof input.openingPrompt !== "string" ||
           !input.openingPrompt.trim() ||
-          input.openingPrompt.length > STUDIO_FIELD_LIMITS.openingPrompt
+          input.openingPrompt.length > openingPromptLimit
         ) {
           return {
             ok: false,
-            error: `Provide one non-empty openingPrompt up to ${STUDIO_FIELD_LIMITS.openingPrompt.toLocaleString()} characters.`,
+            error: `Provide one non-empty openingPrompt up to ${openingPromptLimit.toLocaleString()} characters with the current sessionGoal.`,
           };
         }
         const change = store.updateFromAgent("prepare_first_session", {

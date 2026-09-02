@@ -17,6 +17,10 @@ export const STUDIO_FIELD_LIMITS = {
   appendedNote: 2_000,
 } as const;
 
+const SESSION_GOAL_PREFIX = "Session goal: ";
+const OPENING_MESSAGE_PREFIX = "Opening message:\n";
+const PROMPT_SECTION_SEPARATOR = "\n\n";
+
 export type StudioFlowStep = 1 | 2 | 3 | 4 | 5;
 
 export type StudioSetup = {
@@ -120,15 +124,24 @@ export function compileStudioPrompt(setup: StudioSetup): {
   overLimit: boolean;
 } {
   const sections = [
-    `Session goal: ${setup.sessionGoal.trim()}`,
-    `Opening message:\n${setup.openingPrompt.trim()}`,
+    `${SESSION_GOAL_PREFIX}${setup.sessionGoal.trim()}`,
+    `${OPENING_MESSAGE_PREFIX}${setup.openingPrompt.trim()}`,
   ];
-  const prompt = sections.join("\n\n");
+  const prompt = sections.join(PROMPT_SECTION_SEPARATOR);
   return {
     prompt,
     length: prompt.length,
     overLimit: prompt.length > PERSSUA_SESSION_PARAM_LIMITS.prompt,
   };
+}
+
+export function getOpeningPromptLimit(sessionGoal: string): number {
+  const fixedLength =
+    SESSION_GOAL_PREFIX.length +
+    sessionGoal.trim().length +
+    PROMPT_SECTION_SEPARATOR.length +
+    OPENING_MESSAGE_PREFIX.length;
+  return Math.max(0, PERSSUA_SESSION_PARAM_LIMITS.prompt - fixedLength);
 }
 
 export function isAssistantDefinitionReady(setup: StudioSetup): boolean {

@@ -24,6 +24,7 @@ import {
   buildStudioHandoff,
   compileStudioContext,
   compileStudioPrompt,
+  getOpeningPromptLimit,
   isAssistantDefinitionReady,
   STUDIO_FIELD_LIMITS,
   StudioSetupStore,
@@ -162,11 +163,19 @@ export function CapabilityNotice({ status }: { status: WebMcpStatus }) {
   );
 }
 
-function CharacterCount({ field, value }: { field: StudioTextField; value: string }) {
+function CharacterCount({
+  field,
+  value,
+  maxLength = STUDIO_FIELD_LIMITS[field],
+}: {
+  field: StudioTextField;
+  value: string;
+  maxLength?: number;
+}) {
   return (
     <span className="character-count">
       {value.length.toLocaleString()} /{" "}
-      {STUDIO_FIELD_LIMITS[field].toLocaleString()}
+      {maxLength.toLocaleString()}
     </span>
   );
 }
@@ -180,6 +189,7 @@ function TextField({
   multiline = false,
   rows = 3,
   optional = false,
+  maxLength = STUDIO_FIELD_LIMITS[field],
   onChange,
 }: {
   field: StudioTextField;
@@ -190,6 +200,7 @@ function TextField({
   multiline?: boolean;
   rows?: number;
   optional?: boolean;
+  maxLength?: number;
   onChange: (field: StudioTextField, value: string) => void;
 }) {
   return (
@@ -199,21 +210,21 @@ function TextField({
           {label}
           {optional ? <em>Optional</em> : null}
         </span>
-        <CharacterCount field={field} value={value} />
+        <CharacterCount field={field} value={value} maxLength={maxLength} />
       </span>
       <span className="field-hint">{hint}</span>
       {multiline ? (
         <textarea
           rows={rows}
           value={value}
-          maxLength={STUDIO_FIELD_LIMITS[field]}
+          maxLength={maxLength}
           placeholder={placeholder}
           onChange={(event) => onChange(field, event.target.value)}
         />
       ) : (
         <input
           value={value}
-          maxLength={STUDIO_FIELD_LIMITS[field]}
+          maxLength={maxLength}
           placeholder={placeholder}
           onChange={(event) => onChange(field, event.target.value)}
         />
@@ -399,6 +410,7 @@ export function App() {
   const highestStep = snapshot.highestStep;
   const compiledContext = compileStudioContext(setup);
   const compiledPrompt = compileStudioPrompt(setup);
+  const openingPromptLimit = getOpeningPromptLimit(setup.sessionGoal);
   const handoff = buildStudioHandoff(setup);
   const assistantReady = isAssistantDefinitionReady(setup);
   const copy = STUDIO_LOCALE_COPY[locale];
@@ -737,6 +749,7 @@ export function App() {
                     label="First message"
                     hint="This will be staged for review in Perssua, never submitted automatically."
                     value={setup.openingPrompt}
+                    maxLength={openingPromptLimit}
                     placeholder="Start by summarizing the interview objective, then suggest the first question."
                     multiline
                     rows={10}

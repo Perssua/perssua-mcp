@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { StudioSetupStore } from "./studio-brief";
+import {
+  getOpeningPromptLimit,
+  StudioSetupStore,
+} from "./studio-brief";
 import {
   createStudioTools,
   STUDIO_TOOL_NAMES,
@@ -64,6 +67,22 @@ describe("Studio WebMCP create proposal boundary", () => {
     expect(staged).toMatchObject({ ok: true, staged: true });
     expect(staged).not.toHaveProperty("opened");
     expect(staged).not.toHaveProperty("submitted");
+  });
+
+  it("rejects an opening prompt beyond the budget left by the session goal", async () => {
+    const store = new StudioSetupStore();
+    store.updateHuman("sessionGoal", "Find the unmet need");
+    const prepare = createStudioTools(store).find(
+      (tool) => tool.name === "prepare_first_session",
+    );
+    if (!prepare) throw new Error("Missing prepare_first_session");
+    const available = getOpeningPromptLimit("Find the unmet need");
+    const output = JSON.parse(await prepare.execute({
+      openingPrompt: "p".repeat(available + 1),
+    }));
+    expect(output).toMatchObject({ ok: false });
+    expect(output.error).toContain(available.toLocaleString());
+    expect(store.getSnapshot().setup.openingPrompt).toBe("");
   });
 
   it("paginates JSON-escaped text within the tool output budget", async () => {
