@@ -86,8 +86,10 @@ or encoded URL blocks handoff and returns a visible error.
 | New assistant name | 200 |
 | New assistant instructions | 4,000 |
 | New assistant category | 64 |
-| First message (`prompt`) | 4,000 |
-| Compiled goal plus knowledge (`context`) | 8,000 |
+| Optional Notch, follow-up, and summary prompts | 4,000 each |
+| Session goal (`sessionGoal`) | 2,000 |
+| First-session goal plus opening message (`prompt`) | 4,000 |
+| Permanent knowledge (`context`) | 8,000 |
 | Complete encoded `perssua://` URL | 24,000 |
 
 Create-proposal allowlist:
@@ -97,12 +99,24 @@ mode=create
 assistantName=<proposal>
 assistantInstructions=<proposal>
 assistantCategory=<optional proposal>
-prompt=<staged first message>
-context=<compiled visible context>
+assistantRealtimePrompt=<optional Notch prompt>
+assistantFollowUpPrompt=<optional follow-up prompt>
+assistantEmailPrompt=<optional summary prompt>
+assistantRequireCertainty=<optional true|false|1|0>
+sessionGoal=<optional first-session goal>
+prompt=<first-session goal plus staged opening message>
+context=<permanent knowledge only>
 source=webmcp
 ```
 
-The serializer excludes unknown keys, `assistant`,
+The original v1 keys (`mode`, `assistantName`, `assistantInstructions`, optional
+`assistantCategory`, `prompt`, `context`, and `source`) remain the legacy
+projection. There is deliberately no inline version
+parameter: older Electron builds ignore the optional extension keys and still
+create the basic assistant from its name, system prompt, and category. The
+`sessionGoal` extension remains session-scoped and is also projected into the
+legacy `prompt`. The
+serializer excludes unknown keys, `assistant`,
 `autoSubmit`, file fields, redirects, login requirements, and handoff tokens.
 The optional HTTPS wrapper puts the entire encoded custom-scheme link in the
 fragment rather than an HTTP query.

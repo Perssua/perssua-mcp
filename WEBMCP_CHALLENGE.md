@@ -128,8 +128,10 @@ Limits match Perssua desktop exactly:
 | `assistantName` | 200 |
 | `assistantInstructions` | 4,000 |
 | optional `assistantCategory` | 64 |
-| `prompt` | 4,000 |
-| compiled `context` | 8,000 |
+| optional `assistantRealtimePrompt`, `assistantFollowUpPrompt`, `assistantEmailPrompt` | 4,000 each |
+| optional `sessionGoal` | 2,000 |
+| first-session goal plus `openingPrompt` (`prompt`) | 4,000 |
+| permanent knowledge (`context`) | 8,000 |
 | complete encoded custom-scheme URL | 24,000 |
 
 The only handoff path is an untrusted create proposal:
@@ -137,9 +139,17 @@ The only handoff path is an untrusted create proposal:
 ```text
 mode=create + assistantName + assistantInstructions
 + optional assistantCategory + prompt + context + source=webmcp
++ optional assistantRealtimePrompt + assistantFollowUpPrompt
++ optional assistantEmailPrompt + assistantRequireCertainty (true|false|1|0)
++ optional sessionGoal
 ```
 
-Limits are strictly rejected without silent truncation. Unknown parameters,
+The legacy v1 projection is always present, with no inline version parameter.
+Older Electron builds ignore the optional extension keys and still create the
+basic assistant from the reviewed name, instructions, and category. The session
+goal is carried in the session-scoped `sessionGoal` extension and projected
+into the first prompt for legacy consumers; `context` contains permanent
+knowledge only. Limits are strictly rejected without silent truncation. Unknown parameters,
 `assistant`, `autoSubmit`, files, redirects, and handoff tokens are excluded.
 When an HTTPS launcher is used, the complete encoded deep link stays in the
 fragment, never an HTTP query.

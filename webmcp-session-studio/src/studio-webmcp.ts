@@ -3,6 +3,7 @@ import {
   isAssistantDefinitionReady,
   STUDIO_FIELD_LIMITS,
   type StudioSetupStore,
+  type StudioAgentPatch,
   type StudioTextField,
 } from "./studio-brief";
 
@@ -22,6 +23,10 @@ export const STUDIO_INSPECT_SECTIONS = [
   "assistantName",
   "assistantInstructions",
   "assistantCategory",
+  "realtimePrompt",
+  "followUpPrompt",
+  "emailPrompt",
+  "requireCertainty",
   "sessionGoal",
   "knowledgeNotes",
   "openingPrompt",
@@ -92,6 +97,25 @@ export const STUDIO_TOOL_SCHEMAS = {
         type: "string",
         maxLength: STUDIO_FIELD_LIMITS.assistantCategory,
         description: "Optional proposed category for the new assistant.",
+      },
+      realtimePrompt: {
+        type: "string",
+        maxLength: STUDIO_FIELD_LIMITS.realtimePrompt,
+        description: "Optional complete Notch realtime prompt for the new assistant.",
+      },
+      followUpPrompt: {
+        type: "string",
+        maxLength: STUDIO_FIELD_LIMITS.followUpPrompt,
+        description: "Optional prompt for clickable follow-up suggestions.",
+      },
+      emailPrompt: {
+        type: "string",
+        maxLength: STUDIO_FIELD_LIMITS.emailPrompt,
+        description: "Optional prompt for end-of-session summaries.",
+      },
+      requireCertainty: {
+        type: "boolean",
+        description: "Whether the assistant should reply only when sufficiently certain.",
       },
       sessionGoal: {
         type: "string",
@@ -173,6 +197,10 @@ function setupReceipt(store: StudioSetupStore) {
       assistantName: snapshot.setup.assistantName.length,
       assistantInstructions: snapshot.setup.assistantInstructions.length,
       assistantCategory: snapshot.setup.assistantCategory.length,
+      realtimePrompt: snapshot.setup.realtimePrompt.length,
+      followUpPrompt: snapshot.setup.followUpPrompt.length,
+      emailPrompt: snapshot.setup.emailPrompt.length,
+      requireCertainty: snapshot.setup.requireCertainty,
       sessionGoal: snapshot.setup.sessionGoal.length,
       knowledgeNotes: snapshot.setup.knowledgeNotes.length,
       openingPrompt: snapshot.setup.openingPrompt.length,
@@ -234,7 +262,7 @@ function inspectSetup(
     };
   }
 
-  const text = snapshot.setup[section];
+  const text = String(snapshot.setup[section]);
   let nextOffset = Math.min(offset + STUDIO_INSPECT_TEXT_CHUNK_CHARACTERS, text.length);
   let value = text.slice(offset, nextOffset);
   let response = {
@@ -266,8 +294,12 @@ const ASSISTANT_PROPOSAL_FIELDS: StudioTextField[] = [
   "assistantName",
   "assistantInstructions",
   "assistantCategory",
+  "realtimePrompt",
+  "followUpPrompt",
+  "emailPrompt",
   "sessionGoal",
 ];
+const ASSISTANT_PROPOSAL_BOOLEAN_FIELDS = ["requireCertainty"] as const;
 
 export function createStudioTools(
   store: StudioSetupStore,
@@ -329,8 +361,15 @@ export function createStudioTools(
         if (
           !isRecord(input) ||
           Object.keys(input).length === 0 ||
-          !hasOnlyKeys(input, ASSISTANT_PROPOSAL_FIELDS) ||
-          Object.values(input).some((value) => typeof value !== "string") ||
+          !hasOnlyKeys(input, [
+            ...ASSISTANT_PROPOSAL_FIELDS,
+            ...ASSISTANT_PROPOSAL_BOOLEAN_FIELDS,
+          ]) ||
+          Object.entries(input).some(([field, value]) =>
+            field === "requireCertainty"
+              ? typeof value !== "boolean"
+              : typeof value !== "string",
+          ) ||
           ASSISTANT_PROPOSAL_FIELDS.some(
             (field) =>
               typeof input[field] === "string" &&
@@ -339,13 +378,16 @@ export function createStudioTools(
         ) {
           return {
             ok: false,
-            error: `Provide only in-range strings for: ${ASSISTANT_PROPOSAL_FIELDS.join(", ")}.`,
+            error: `Provide only in-range strings and optional boolean requireCertainty for: ${ASSISTANT_PROPOSAL_FIELDS.join(", ")}.`,
           };
         }
 
-        const patch: Partial<Record<StudioTextField, string>> = {};
+        const patch: StudioAgentPatch = {};
         for (const field of ASSISTANT_PROPOSAL_FIELDS) {
           if (typeof input[field] === "string") patch[field] = input[field];
+        }
+        if (typeof input.requireCertainty === "boolean") {
+          patch.requireCertainty = input.requireCertainty;
         }
         const proposedSetup = { ...store.getSnapshot().setup, ...patch };
         const change = store.updateFromAgent(

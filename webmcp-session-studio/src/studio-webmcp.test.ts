@@ -25,19 +25,36 @@ describe("Studio WebMCP create proposal boundary", () => {
     expect(STUDIO_TOOL_SCHEMAS.define_assistant.properties).not.toHaveProperty("existingAssistant");
   });
 
-  it("advances a complete proposal only to visible human review", async () => {
+  it("stages native assistant extensions and advances a complete proposal only to visible human review", async () => {
     const store = new StudioSetupStore();
     const define = createStudioTools(store).find((tool) => tool.name === "define_assistant");
     if (!define) throw new Error("Missing define_assistant");
     const result = JSON.parse(await define.execute({
       assistantName: "Research partner",
       assistantInstructions: "Ask one question at a time.",
+      realtimePrompt: "Suggest one concise next sentence.",
+      followUpPrompt: "Offer three questions.",
+      emailPrompt: "Summarize decisions.",
+      requireCertainty: true,
       sessionGoal: "Find the unmet need",
     }));
     expect(result).toMatchObject({ ok: true, advancedToStep: 2, currentStep: 2 });
     expect(store.getSnapshot().agentChanges[0].changes).toContainEqual({
       field: "studioStep", before: "1", after: "2",
     });
+    expect(store.getSnapshot().setup).toMatchObject({
+      realtimePrompt: "Suggest one concise next sentence.",
+      followUpPrompt: "Offer three questions.",
+      emailPrompt: "Summarize decisions.",
+      requireCertainty: true,
+    });
+  });
+
+  it("rejects non-boolean certainty and unknown native fields", async () => {
+    await expect(call("define_assistant", { requireCertainty: "true" }))
+      .resolves.toMatchObject({ ok: false });
+    await expect(call("define_assistant", { nativeVersion: "2" }))
+      .resolves.toMatchObject({ ok: false });
   });
 
   it("rejects removed existing-assistant input and never opens or submits", async () => {

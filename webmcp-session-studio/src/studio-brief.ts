@@ -8,6 +8,9 @@ export const STUDIO_FIELD_LIMITS = {
   assistantName: PERSSUA_SESSION_PARAM_LIMITS.assistantName,
   assistantInstructions: PERSSUA_SESSION_PARAM_LIMITS.assistantInstructions,
   assistantCategory: PERSSUA_SESSION_PARAM_LIMITS.assistantCategory,
+  realtimePrompt: PERSSUA_SESSION_PARAM_LIMITS.assistantRealtimePrompt,
+  followUpPrompt: PERSSUA_SESSION_PARAM_LIMITS.assistantFollowUpPrompt,
+  emailPrompt: PERSSUA_SESSION_PARAM_LIMITS.assistantEmailPrompt,
   sessionGoal: 2_000,
   knowledgeNotes: PERSSUA_SESSION_PARAM_LIMITS.context,
   openingPrompt: PERSSUA_SESSION_PARAM_LIMITS.prompt,
@@ -20,14 +23,20 @@ export type StudioSetup = {
   assistantName: string;
   assistantInstructions: string;
   assistantCategory: string;
+  realtimePrompt: string;
+  followUpPrompt: string;
+  emailPrompt: string;
+  requireCertainty: boolean;
   sessionGoal: string;
   knowledgeNotes: string;
   openingPrompt: string;
 };
 
 export type StudioSetupField = keyof StudioSetup;
-export type StudioTextField = StudioSetupField;
+export type StudioTextField = Exclude<StudioSetupField, "requireCertainty">;
 export type StudioTrackedField = StudioSetupField | "studioStep";
+export type StudioAgentPatch = Partial<Pick<StudioSetup, StudioTextField>> &
+  Pick<Partial<StudioSetup>, "requireCertainty">;
 
 export type StudioAgentChange = {
   id: number;
@@ -54,10 +63,16 @@ export type StudioHandoffResult =
       deepLink: string;
       encodedLength: number;
       contextLength: number;
+      promptLength: number;
     }
   | {
       ok: false;
-      code: "incomplete" | "context_too_long" | "field_too_long" | "url_too_long";
+      code:
+        | "incomplete"
+        | "context_too_long"
+        | "prompt_too_long"
+        | "field_too_long"
+        | "url_too_long";
       error: string;
       field?: string;
       encodedLength?: number;
@@ -67,6 +82,10 @@ export const EMPTY_STUDIO_SETUP: StudioSetup = {
   assistantName: "",
   assistantInstructions: "",
   assistantCategory: "",
+  realtimePrompt: "",
+  followUpPrompt: "",
+  emailPrompt: "",
+  requireCertainty: false,
   sessionGoal: "",
   knowledgeNotes: "",
   openingPrompt: "",
@@ -84,20 +103,31 @@ export function compileStudioContext(setup: StudioSetup): {
   length: number;
   overLimit: boolean;
 } {
-  const sections = [
-    setup.sessionGoal.trim()
-      ? `Session goal:\n${setup.sessionGoal.trim()}`
-      : "",
-    setup.knowledgeNotes.trim()
-      ? `Knowledge and context:\n${setup.knowledgeNotes.trim()}`
-      : "",
-  ].filter(Boolean);
-  const context = sections.join("\n\n");
+  // Assistant context is permanent. The first-session goal belongs only in
+  // the first prompt so a later session cannot inherit a one-off objective.
+  const context = setup.knowledgeNotes.trim();
 
   return {
     context,
     length: context.length,
     overLimit: context.length > PERSSUA_SESSION_PARAM_LIMITS.context,
+  };
+}
+
+export function compileStudioPrompt(setup: StudioSetup): {
+  prompt: string;
+  length: number;
+  overLimit: boolean;
+} {
+  const sections = [
+    `Session goal: ${setup.sessionGoal.trim()}`,
+    `Opening message:\n${setup.openingPrompt.trim()}`,
+  ];
+  const prompt = sections.join("\n\n");
+  return {
+    prompt,
+    length: prompt.length,
+    overLimit: prompt.length > PERSSUA_SESSION_PARAM_LIMITS.prompt,
   };
 }
 
@@ -125,7 +155,17 @@ export function buildStudioHandoff(setup: StudioSetup): StudioHandoffResult {
       ok: false,
       code: "context_too_long",
       field: "knowledgeNotes",
-      error: `The compiled context is ${compiledContext.length.toLocaleString()} characters. Reduce the session goal or knowledge notes to stay within ${PERSSUA_SESSION_PARAM_LIMITS.context.toLocaleString()}; nothing was truncated.`,
+      error: `The permanent knowledge is ${compiledContext.length.toLocaleString()} characters. Reduce the knowledge notes to stay within ${PERSSUA_SESSION_PARAM_LIMITS.context.toLocaleString()}; nothing was truncated.`,
+    };
+  }
+
+  const compiledPrompt = compileStudioPrompt(setup);
+  if (compiledPrompt.overLimit) {
+    return {
+      ok: false,
+      code: "prompt_too_long",
+      field: "openingPrompt",
+      error: `The first-session goal plus opening message is ${compiledPrompt.length.toLocaleString()} characters. Reduce them to stay within ${PERSSUA_SESSION_PARAM_LIMITS.prompt.toLocaleString()}; nothing was truncated.`,
     };
   }
 
@@ -134,7 +174,12 @@ export function buildStudioHandoff(setup: StudioSetup): StudioHandoffResult {
     assistantName: setup.assistantName.trim(),
     assistantInstructions: setup.assistantInstructions.trim(),
     assistantCategory: setup.assistantCategory.trim() || undefined,
-    prompt: setup.openingPrompt.trim(),
+    assistantRealtimePrompt: setup.realtimePrompt.trim() || undefined,
+    assistantFollowUpPrompt: setup.followUpPrompt.trim() || undefined,
+    assistantEmailPrompt: setup.emailPrompt.trim() || undefined,
+    assistantRequireCertainty: String(setup.requireCertainty),
+    sessionGoal: setup.sessionGoal.trim(),
+    prompt: compiledPrompt.prompt,
     context: compiledContext.context,
     source: "webmcp",
   });
@@ -157,6 +202,7 @@ export function buildStudioHandoff(setup: StudioSetup): StudioHandoffResult {
     deepLink: strict.deepLink,
     encodedLength: strict.encodedLength,
     contextLength: compiledContext.length,
+    promptLength: compiledPrompt.length,
   };
 }
 
@@ -210,7 +256,7 @@ export class StudioSetupStore {
 
   updateFromAgent(
     toolName: string,
-    patch: Partial<Record<StudioTextField, string>>,
+    patch: StudioAgentPatch,
     advanceToStep?: StudioFlowStep,
   ): StudioAgentChange | null {
     const nextSetup = { ...this.snapshot.setup };
@@ -223,6 +269,15 @@ export class StudioSetupStore {
       if (normalized === nextSetup[field]) continue;
       changes.push({ field, before: nextSetup[field], after: normalized });
       nextSetup[field] = normalized;
+    }
+
+    if (typeof patch.requireCertainty === "boolean" && patch.requireCertainty !== nextSetup.requireCertainty) {
+      changes.push({
+        field: "requireCertainty",
+        before: String(nextSetup.requireCertainty),
+        after: String(patch.requireCertainty),
+      });
+      nextSetup.requireCertainty = patch.requireCertainty;
     }
 
     const nextStep = advanceToStep && advanceToStep > this.snapshot.currentStep
@@ -285,10 +340,10 @@ export class StudioSetupStore {
 
   resetFromAgent(toolName: string): StudioAgentChange | null {
     const changes: StudioAgentChange["changes"] = [];
-    for (const field of Object.keys(EMPTY_STUDIO_SETUP) as StudioTextField[]) {
+    for (const field of Object.keys(EMPTY_STUDIO_SETUP) as StudioSetupField[]) {
       const before = this.snapshot.setup[field] ?? "";
       const after = EMPTY_STUDIO_SETUP[field] ?? "";
-      if (before !== after) changes.push({ field, before, after });
+      if (before !== after) changes.push({ field, before: String(before), after: String(after) });
     }
     if (this.snapshot.currentStep !== 1) {
       changes.push({
@@ -315,6 +370,11 @@ export class StudioSetupStore {
       nextStep,
       Math.max(this.snapshot.highestStep, nextStep) as StudioFlowStep,
     );
+  }
+
+  updateHumanRequireCertainty(value: boolean): void {
+    if (this.snapshot.setup.requireCertainty === value) return;
+    this.commit({ ...this.snapshot.setup, requireCertainty: value });
   }
 
   goToStepFromHuman(step: StudioFlowStep): void {

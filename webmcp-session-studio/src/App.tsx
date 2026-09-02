@@ -23,6 +23,7 @@ import perssuaMark from "./assets/perssua-mark.svg";
 import {
   buildStudioHandoff,
   compileStudioContext,
+  compileStudioPrompt,
   isAssistantDefinitionReady,
   STUDIO_FIELD_LIMITS,
   StudioSetupStore,
@@ -100,6 +101,10 @@ const FIELD_LABELS: Record<StudioSetupField | "studioStep", string> = {
   assistantName: "Assistant name",
   assistantInstructions: "Instructions",
   assistantCategory: "Category",
+  realtimePrompt: "Notch prompt",
+  followUpPrompt: "Follow-up prompt",
+  emailPrompt: "Summary prompt",
+  requireCertainty: "Require certainty",
   sessionGoal: "Session goal",
   knowledgeNotes: "Knowledge notes",
   openingPrompt: "First message",
@@ -393,6 +398,7 @@ export function App() {
   const currentStep = snapshot.currentStep;
   const highestStep = snapshot.highestStep;
   const compiledContext = compileStudioContext(setup);
+  const compiledPrompt = compileStudioPrompt(setup);
   const handoff = buildStudioHandoff(setup);
   const assistantReady = isAssistantDefinitionReady(setup);
   const copy = STUDIO_LOCALE_COPY[locale];
@@ -427,7 +433,16 @@ export function App() {
 
   useEffect(() => {
     setProposalReviewed(false);
-  }, [setup.assistantName, setup.assistantInstructions, setup.assistantCategory, setup.sessionGoal]);
+  }, [
+    setup.assistantName,
+    setup.assistantInstructions,
+    setup.assistantCategory,
+    setup.realtimePrompt,
+    setup.followUpPrompt,
+    setup.emailPrompt,
+    setup.requireCertainty,
+    setup.sessionGoal,
+  ]);
 
   const updateHuman = (field: StudioTextField, value: string) => {
     store.updateHuman(field, value);
@@ -581,6 +596,47 @@ export function App() {
                     onChange={updateHuman}
                   />
                   <TextField
+                    field="realtimePrompt"
+                    label="Notch realtime prompt"
+                    hint="Optional. Guides real-time Notch suggestions."
+                    value={setup.realtimePrompt}
+                    placeholder="Listen for the user’s intent, then suggest one concise next sentence."
+                    multiline
+                    rows={4}
+                    optional
+                    onChange={updateHuman}
+                  />
+                  <TextField
+                    field="followUpPrompt"
+                    label="Follow-up prompt"
+                    hint="Optional. Defines clickable follow-up suggestions."
+                    value={setup.followUpPrompt}
+                    placeholder="Offer three practical follow-up questions."
+                    multiline
+                    rows={3}
+                    optional
+                    onChange={updateHuman}
+                  />
+                  <TextField
+                    field="emailPrompt"
+                    label="Summary prompt"
+                    hint="Optional. Defines the end-of-session summary."
+                    value={setup.emailPrompt}
+                    placeholder="Summarize decisions, owners, and the next step."
+                    multiline
+                    rows={3}
+                    optional
+                    onChange={updateHuman}
+                  />
+                  <label className="review-confirmation">
+                    <input
+                      type="checkbox"
+                      checked={setup.requireCertainty}
+                      onChange={(event) => store.updateHumanRequireCertainty(event.target.checked)}
+                    />
+                    <span><strong>Require certainty.</strong>Only reply when the assistant is sufficiently certain.</span>
+                  </label>
+                  <TextField
                     field="assistantInstructions"
                     label="Instructions"
                     hint="Define the assistant's role, behavior, boundaries, and response style."
@@ -624,6 +680,10 @@ export function App() {
                   <ReviewRow label="Assistant name" value={setup.assistantName} />
                   <ReviewRow label="Instructions" value={setup.assistantInstructions} />
                   <ReviewRow label="Category" value={setup.assistantCategory} empty="No category" />
+                  <ReviewRow label="Notch prompt" value={setup.realtimePrompt} empty="Use Perssua default" />
+                  <ReviewRow label="Follow-up prompt" value={setup.followUpPrompt} empty="Use Perssua default" />
+                  <ReviewRow label="Summary prompt" value={setup.emailPrompt} empty="Use Perssua default" />
+                  <ReviewRow label="Require certainty" value={setup.requireCertainty ? "Yes" : "No"} />
                   <ReviewRow label="Session goal" value={setup.sessionGoal} />
                   <label className="review-confirmation">
                     <input type="checkbox" checked={proposalReviewed} onChange={(event) => setProposalReviewed(event.target.checked)} />
@@ -663,8 +723,8 @@ export function App() {
                     </i>
                     <p>
                       {compiledContext.overLimit
-                        ? "Reduce the goal or knowledge notes. Nothing will be truncated."
-                        : "Includes the session goal plus these knowledge notes."}
+                        ? "Reduce the permanent knowledge notes. Nothing will be truncated."
+                        : "Only permanent knowledge is saved with the assistant. The first-session goal stays in the first message."}
                     </p>
                   </div>
                 </div>
@@ -688,7 +748,7 @@ export function App() {
                       preview
                     </span>
                     <p>
-                      {setup.openingPrompt.trim() ||
+                      {compiledPrompt.prompt.trim() ||
                         "Your first message will appear here."}
                     </p>
                     <small>Waiting for your review — not sent</small>
@@ -713,6 +773,10 @@ export function App() {
                   <ReviewRow label="Assistant name" value={setup.assistantName} />
                   <ReviewRow label="Instructions" value={setup.assistantInstructions} />
                   <ReviewRow label="Category" value={setup.assistantCategory} empty="No category" />
+                  <ReviewRow label="Notch prompt" value={setup.realtimePrompt} empty="Use Perssua default" />
+                  <ReviewRow label="Follow-up prompt" value={setup.followUpPrompt} empty="Use Perssua default" />
+                  <ReviewRow label="Summary prompt" value={setup.emailPrompt} empty="Use Perssua default" />
+                  <ReviewRow label="Require certainty" value={setup.requireCertainty ? "Yes" : "No"} />
                   <ReviewRow label="Session goal" value={setup.sessionGoal} />
                   <ReviewRow
                     label="Knowledge"

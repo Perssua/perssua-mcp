@@ -15,7 +15,12 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { bridgeSupports, getAppStatus, readAssistantsRoster, resolveBridge } from './bridge.js';
-import { buildHandoffPayload, writeHandoffFile } from './handoffPayload.js';
+import {
+  HANDOFF_LIMITS,
+  buildHandoffPayload,
+  buildLegacyPromptProjection,
+  writeHandoffFile,
+} from './handoffPayload.js';
 import {
   buildHandoffDeepLink,
   buildInlineDeepLink,
@@ -230,11 +235,11 @@ export const createPerssuaMcpServer = ({
     {
       title: 'Create a Perssua assistant',
       description:
-        'Create a new custom assistant in the Perssua desktop app (name + system-prompt instructions, optional knowledge) and open a session with it. ' +
+        'Create a new custom assistant in the Perssua desktop app with system, Notch, follow-up, and summary behavior, then open a session with it. ' +
         'BEFORE calling this, interview the user briefly so the assistant fits: (1) what is the assistant\'s goal / what sessions will it support, ' +
         '(2) how should it respond (tone, format, language), (3) what knowledge should it carry (notes, files, background), ' +
         '(4) what should the first session start with. Then write the instructions yourself from those answers. ' +
-        'Knowledge text and files become the assistant\'s permanent context, not part of the first message. ' +
+        'Knowledge text and files become the assistant\'s permanent context. sessionGoal is carried only with the first session and is never saved on the assistant. ' +
         'Runs on the same machine as the Perssua app.',
       annotations: {
         title: 'Create a Perssua assistant',
@@ -258,11 +263,16 @@ export const createPerssuaMcpServer = ({
           .max(64)
           .optional()
           .describe('Optional category label for the assistants library.'),
+        realtimePrompt: z.string().max(HANDOFF_LIMITS.assistantRealtimePromptChars).optional().describe('Optional complete Notch realtime prompt. Blank uses Perssua’s fallback.'),
+        followUpPrompt: z.string().max(HANDOFF_LIMITS.assistantFollowUpPromptChars).optional().describe('Optional prompt for clickable follow-up suggestions. Blank uses the default.'),
+        emailPrompt: z.string().max(HANDOFF_LIMITS.assistantEmailPromptChars).optional().describe('Optional prompt for summaries and end-of-session overview. Blank uses the default.'),
+        requireCertainty: z.boolean().optional().describe('Only reply when sufficiently certain.'),
         knowledge: z
           .string()
           .max(128000)
           .optional()
           .describe('Free-text knowledge stored with the assistant (background, notes, decisions).'),
+        sessionGoal: z.string().max(HANDOFF_LIMITS.sessionGoalChars).optional().describe('Goal only for this first session; it is not stored on the assistant.'),
         files: z
           .array(z.string())
           .max(20)
@@ -284,9 +294,14 @@ export const createPerssuaMcpServer = ({
           .describe('Calling product, e.g. "claude", "chatgpt", "grok". Defaults to the PERSSUA_MCP_SOURCE env var or "mcp".'),
       },
     },
-    async ({ name, instructions, category, knowledge, files, firstPrompt, autoSubmit, source }) => {
+    async ({ name, instructions, category, realtimePrompt, followUpPrompt, emailPrompt, requireCertainty, knowledge, sessionGoal, files, firstPrompt, autoSubmit, source }) => {
       const bridge = resolveBridgeFn();
       const effectiveSource = source || process.env.PERSSUA_MCP_SOURCE || 'mcp';
+      const sessionScopedPrompt = buildLegacyPromptProjection(
+        firstPrompt || '',
+        String(sessionGoal || '').trim(),
+        HANDOFF_LIMITS.promptChars,
+      );
 
       if (!bridge.found) {
         return textResult(
@@ -314,9 +329,12 @@ export const createPerssuaMcpServer = ({
       }
 
       const { payload, warnings } = buildHandoffPayload({
-        newAssistant: { name, instructions, category },
-        prompt: firstPrompt,
+        // Keep name/instructions/category as the permanent v1 projection.
+        // Older Electron builds ignore the additive native prompt fields.
+        newAssistant: { name, instructions, category, realtimePrompt, followUpPrompt, emailPrompt, requireCertainty },
+        prompt: sessionScopedPrompt,
         context: knowledge,
+        sessionGoal,
         files,
         autoSubmit: autoSubmit !== false,
         source: effectiveSource,
@@ -389,10 +407,11 @@ export const createPerssuaMcpServer = ({
               '1. Goal: what should this assistant help me with? What kind of sessions will I use it in (meetings, interviews, studying, sales calls, ...)?',
               goal ? `   (I already said: ${goal} — confirm and refine instead of re-asking.)` : null,
               '2. Style: how should it respond? Tone, format (bullets vs prose), language, and how concise.',
-              '3. Knowledge: what background should it always carry? Ask me for notes or local text files to attach.',
-              '4. Kickoff: what should the first session start with?',
+              '3. Knowledge: what background should it always carry? Ask me for notes or local text files to attach. Keep the first-session goal separate.',
+              '4. Optional native behavior: should it have a Notch realtime prompt, follow-up suggestions, an email/summary prompt, or require certainty?',
+              '5. Kickoff: what should the first session start with?',
               '',
-              'Then: write a strong system prompt from my answers (goal, behavior, tone, format, language), show me the name + instructions for a quick OK, and call the create_assistant tool with name, instructions, knowledge/files, and firstPrompt. Keep the interview tight — skip questions I already answered.',
+              'Then: write a strong system prompt from my answers (goal, behavior, tone, format, language), draft each requested native prompt separately, show the name, system prompt, optional native prompts, permanent knowledge, session goal, and first prompt for a quick OK, and call create_assistant. Keep the interview tight — skip questions I already answered.',
             ].filter((line) => line !== null).join('\n'),
           },
         },
