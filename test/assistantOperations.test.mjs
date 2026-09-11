@@ -10,6 +10,7 @@ import {
   buildAssistantOperationDeepLink,
   buildAssistantOperationRequest,
   buildPendingAssistantOperationResult,
+  fingerprintAssistantOperationRequest,
   readAssistantOperationRequest,
   readAssistantOperationResult,
   writeAssistantOperationRequest,
@@ -175,6 +176,17 @@ test('patches reject session/file fields and total UTF-8 byte overflow without t
 
 test('results must be app-authored for the current bridge session', () => {
   const operationsDir = makeTempDir();
+  const request = buildAssistantOperationRequest({
+    requestId: 'request_get_2',
+    operation: 'get_assistant',
+    bridgeSessionId: 'bridge_session_1',
+    accountScope: 'account_scope_1',
+    assistantRef: 'assistant_ref_opaque',
+    now: () => new Date('2026-09-11T12:00:00.000Z'),
+  });
+  writeAssistantOperationRequest(operationsDir, request, {
+    now: () => Date.parse('2026-09-11T12:00:00.000Z'),
+  });
   const resultDir = path.join(operationsDir, 'results');
   fs.mkdirSync(resultDir, { recursive: true });
   fs.writeFileSync(
@@ -185,6 +197,7 @@ test('results must be app-authored for the current bridge session', () => {
       operation: 'get_assistant',
       bridgeSessionId: 'bridge_session_1',
       accountScope: 'account_scope_1',
+      requestFingerprint: fingerprintAssistantOperationRequest(request),
       status: 'completed',
       createdAt: '2026-09-11T12:00:00.000Z',
       updatedAt: '2026-09-11T12:00:01.000Z',
@@ -212,6 +225,69 @@ test('results must be app-authored for the current bridge session', () => {
       now: () => Date.parse('2026-09-13T12:00:00.000Z'),
     }),
     (error) => error.code === 'RESULT_EXPIRED',
+  );
+});
+
+test('results are rejected when their fingerprint belongs to a stale request identity', () => {
+  const operationsDir = makeTempDir();
+  const currentRequest = buildAssistantOperationRequest({
+    requestId: 'request_update_stale_1',
+    operation: 'update_assistant',
+    bridgeSessionId: 'bridge_session_current',
+    accountScope: 'account_scope_1',
+    assistantRef: 'assistant_ref_opaque',
+    expectedRevision: 'revision_2',
+    patch: { name: 'Current name' },
+    now: () => new Date('2026-09-11T12:00:00.000Z'),
+  });
+  const staleRequest = buildAssistantOperationRequest({
+    requestId: currentRequest.requestId,
+    operation: currentRequest.operation,
+    bridgeSessionId: 'bridge_session_stale',
+    accountScope: currentRequest.accountScope,
+    assistantRef: currentRequest.target.assistantRef,
+    expectedRevision: 'revision_1',
+    patch: { name: 'Stale name' },
+    now: () => new Date('2026-09-11T11:59:00.000Z'),
+  });
+  writeAssistantOperationRequest(operationsDir, currentRequest, {
+    now: () => Date.parse('2026-09-11T12:00:00.000Z'),
+  });
+
+  const resultDir = path.join(operationsDir, 'results');
+  fs.mkdirSync(resultDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(resultDir, `${currentRequest.requestId}.json`),
+    JSON.stringify({
+      version: 1,
+      requestId: currentRequest.requestId,
+      operation: currentRequest.operation,
+      bridgeSessionId: 'bridge_session_stale',
+      accountScope: currentRequest.accountScope,
+      requestFingerprint: fingerprintAssistantOperationRequest(staleRequest),
+      status: 'completed',
+      createdAt: '2026-09-11T12:00:00.000Z',
+      updatedAt: '2026-09-11T12:00:01.000Z',
+      target: currentRequest.target,
+      expectedRevision: currentRequest.expectedRevision,
+      assistant: { name: 'Stale name', revision: 'revision_stale' },
+    }),
+  );
+
+  assert.throws(
+    () => readAssistantOperationResult(operationsDir, currentRequest.requestId, {
+      accountScope: currentRequest.accountScope,
+      request: currentRequest,
+      now: () => Date.parse('2026-09-11T12:00:02.000Z'),
+    }),
+    (error) => error.code === 'RESULT_REQUEST_MISMATCH',
+  );
+  assert.throws(
+    () => readAssistantOperationResult(operationsDir, currentRequest.requestId, {
+      accountScope: currentRequest.accountScope,
+      now: () => Date.parse('2026-09-11T12:00:02.000Z'),
+    }),
+    (error) => error.code === 'RESULT_REQUEST_MISMATCH',
   );
 });
 

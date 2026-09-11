@@ -183,6 +183,36 @@ test('update_assistant preserves explicit null clears in the app request', async
   });
 });
 
+test('submit binds any existing receipt to the request that was just written', async () => {
+  let checkedRequest = null;
+  await withClient({
+    resolveBridgeFn: () => BRIDGE,
+    readRosterFn: () => ROSTER,
+    writeOperationRequestFn: () => ({ requestPath: '/test/request.json', reused: false }),
+    readOperationResultFn: (_dir, _requestId, options) => {
+      checkedRequest = options.request;
+      const error = new Error('stale receipt');
+      error.code = 'RESULT_REQUEST_MISMATCH';
+      throw error;
+    },
+  }, async (client) => {
+    const result = await client.callTool({
+      name: 'update_assistant',
+      arguments: {
+        assistantRef: 'assistant_ref_opaque',
+        expectedRevision: 'revision_1',
+        requestId: 'request_update_bound_1',
+        patch: { name: 'Current name' },
+      },
+    });
+
+    assert.equal(result.isError, true);
+    assert.equal(result.structuredContent.error.code, 'RESULT_REQUEST_MISMATCH');
+    assert.equal(checkedRequest.requestId, 'request_update_bound_1');
+    assert.deepEqual(checkedRequest.patch, { name: 'Current name' });
+  });
+});
+
 test('legacy apps fail closed instead of accepting assistant mutations', async () => {
   await withClient({
     resolveBridgeFn: () => ({

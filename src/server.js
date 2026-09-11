@@ -397,7 +397,7 @@ export const createPerssuaMcpServer = ({
       const result = readOperationResultFn(
         bridge.assistantOperationsDir,
         requestId,
-        { accountScope: readiness.binding.accountScope },
+        { accountScope: readiness.binding.accountScope, request },
       );
       if (result) return operationResult(result);
     } catch (error) {

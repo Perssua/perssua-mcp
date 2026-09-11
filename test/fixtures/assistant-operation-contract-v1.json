@@ -86,6 +86,7 @@
     "operation": "update_assistant",
     "bridgeSessionId": "opaque_executing_app_instance",
     "accountScope": "opaque_account_scope",
+    "requestFingerprint": "r8PHNxB9ab7rIUsjdfrJawJ5-SjB3WfGopslHK0AlSU",
     "status": "completed",
     "createdAt": "2026-09-11T12:00:00.000Z",
     "updatedAt": "2026-09-11T12:00:01.000Z",

@@ -57,28 +57,56 @@ export class AssistantRemoteApiError extends Error {
 
 const parseAssistantContext = (contextString) => {
   if (!contextString) return { files: [], manualText: '' };
+  const marker = '### File: ';
+  const firstMarker = contextString.indexOf(marker);
+  if (firstMarker === -1) return { files: [], manualText: contextString.trim() };
+
+  const failClosed = () => ({ files: [], manualText: '' });
+  const manualText = contextString.slice(0, firstMarker).trim();
+  const serializedFiles = contextString.slice(firstMarker);
   const files = [];
-  const fileRegex = /### File: (.+?)\n(`{3,})\n([\s\S]*?)\n\2/g;
-  let match;
-  let lastIndex = 0;
-  let manualText = '';
-  while ((match = fileRegex.exec(contextString)) !== null) {
-    if (match.index > lastIndex) {
-      const preceding = contextString.substring(lastIndex, match.index).trim();
-      if (preceding) manualText += `${manualText ? '\n\n' : ''}${preceding}`;
+  let cursor = 0;
+  while (cursor < serializedFiles.length) {
+    if (!serializedFiles.startsWith(marker, cursor)) return failClosed();
+    const nameEnd = serializedFiles.indexOf('\n', cursor + marker.length);
+    if (nameEnd === -1) return failClosed();
+    const name = serializedFiles.slice(cursor + marker.length, nameEnd);
+    if (!name) return failClosed();
+
+    const fenceStart = nameEnd + 1;
+    const fenceEnd = serializedFiles.indexOf('\n', fenceStart);
+    if (fenceEnd === -1) return failClosed();
+    const fence = serializedFiles.slice(fenceStart, fenceEnd);
+    if (!/^`{3,}$/.test(fence)) return failClosed();
+
+    const contentStart = fenceEnd + 1;
+    const closingPrefix = `\n${fence}`;
+    let searchAt = contentStart;
+    let closingEnd = -1;
+    while (searchAt < serializedFiles.length) {
+      const prefixAt = serializedFiles.indexOf(closingPrefix, searchAt);
+      if (prefixAt === -1) break;
+      const lineEnd = prefixAt + closingPrefix.length;
+      if (lineEnd < serializedFiles.length && serializedFiles[lineEnd] !== '\n') {
+        searchAt = lineEnd;
+        continue;
+      }
+      const remainder = serializedFiles.slice(lineEnd);
+      if (remainder === '' || remainder.startsWith(`\n\n${marker}`)) {
+        closingEnd = lineEnd;
+        break;
+      }
+      // Canonical producers choose a fence longer than any run in the file.
+      // An earlier same-length fence is therefore ambiguous and must not let
+      // the remaining attachment body escape into manual knowledge.
+      return failClosed();
     }
-    files.push({ name: match[1], contentIncluded: false });
-    lastIndex = match.index + match[0].length;
+    if (closingEnd === -1) return failClosed();
+
+    files.push({ name, contentIncluded: false });
+    if (closingEnd === serializedFiles.length) break;
+    cursor = closingEnd + 2;
   }
-  if (lastIndex < contextString.length) {
-    const trailing = contextString.substring(lastIndex).trim();
-    if (trailing) manualText += `${manualText ? '\n\n' : ''}${trailing}`;
-  }
-  // If an attachment marker did not parse cleanly, never fall back to
-  // exposing the serialized context as manual knowledge.
-  const attachmentMarkerCount = (contextString.match(/### File:/g) || []).length;
-  if (attachmentMarkerCount !== files.length) return { files, manualText: '' };
-  if (files.length === 0 && contextString.trim()) manualText = contextString.trim();
   return { files, manualText };
 };
 

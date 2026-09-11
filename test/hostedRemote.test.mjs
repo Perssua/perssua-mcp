@@ -287,6 +287,33 @@ test('hosted reads fail closed on malformed attachment serialization', async () 
   });
 });
 
+test('hosted reads fail closed when a same-length nested fence could expose file contents', async () => {
+  const fetchFn = async () => json({
+    assistant: {
+      id: 'user_0',
+      source: 'user',
+      name: 'Coach',
+      context: 'Manual notes\n\n### File: secret.md\n```\nfirst secret\n```\nremaining secret\n```',
+    },
+    revision: 'sha256:one',
+    permissions: { read: true, update: true, delete: true },
+  });
+  await withClient(fetchFn, async (client) => {
+    const result = await client.callTool({
+      name: 'get_assistant',
+      arguments: { assistant: 'user_0', requestId: 'request_get_nested_fence_1' },
+    });
+    assert.deepEqual(result.structuredContent.assistant.knowledge, {
+      text: null,
+      files: [],
+    });
+    const serialized = JSON.stringify(result);
+    assert.equal(serialized.includes('Manual notes'), false);
+    assert.equal(serialized.includes('first secret'), false);
+    assert.equal(serialized.includes('remaining secret'), false);
+  });
+});
+
 test('hosted list preserves explicit and backend-fallback selection flags', async () => {
   let listCall = 0;
   const fetchFn = async () => {

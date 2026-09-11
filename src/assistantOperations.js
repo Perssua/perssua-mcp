@@ -6,6 +6,7 @@
  * Firestore, settings.json, or the app database directly.
  */
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -212,6 +213,10 @@ const requestIdentity = (request) => JSON.stringify(stableValue({
   patch: request?.patch,
 }));
 
+export const fingerprintAssistantOperationRequest = (request) => (
+  crypto.createHash('sha256').update(requestIdentity(request)).digest('base64url')
+);
+
 /**
  * Write a request once. Retrying the exact logical requestId + payload is
  * idempotent; reusing it for a different payload fails closed.
@@ -331,7 +336,7 @@ const isKnownStatus = (status) => ASSISTANT_OPERATION_STATUSES.includes(status);
 export const readAssistantOperationResult = (
   operationsDir,
   requestId,
-  { accountScope, now = Date.now } = {},
+  { accountScope, request: expectedRequest, now = Date.now } = {},
 ) => {
   let result;
   try {
@@ -349,6 +354,8 @@ export const readAssistantOperationResult = (
     || result.requestId !== requestId
     || !['get_assistant', 'update_assistant', 'delete_assistant'].includes(result.operation)
     || !isKnownStatus(result.status)
+    || typeof result.requestFingerprint !== 'string'
+    || !result.requestFingerprint
   ) {
     throw new Error('Invalid assistant operation result');
   }
@@ -370,6 +377,31 @@ export const readAssistantOperationResult = (
     const error = new Error('Assistant operation result has expired');
     error.code = 'RESULT_EXPIRED';
     throw error;
+  }
+
+  let request = expectedRequest;
+  if (!request) {
+    try {
+      request = readJsonFile(
+        getOperationPath(operationsDir, ASSISTANT_OPERATION_REQUESTS_DIR, requestId),
+        ASSISTANT_OPERATION_LIMITS.requestBytes,
+      );
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+  }
+  if (request) {
+    const fingerprintMatches = result.requestFingerprint
+      === fingerprintAssistantOperationRequest(request);
+    const identityMatches = request.requestId === requestId
+      && result.operation === request.operation
+      && result.accountScope === request.accountScope
+      && requestIdentity({ ...result, patch: request.patch }) === requestIdentity(request);
+    if (!fingerprintMatches || !identityMatches) {
+      const error = new Error('Assistant operation result does not match the current request identity');
+      error.code = 'RESULT_REQUEST_MISMATCH';
+      throw error;
+    }
   }
   return result;
 };
