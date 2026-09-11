@@ -145,9 +145,14 @@ test('hosted tools expose only remote CRUD with per-tool OAuth schemes and safe 
   assert.deepEqual(REMOTE_TOOLS.find((tool) => tool.name === 'list_assistants').securitySchemes, [
     { type: 'oauth2', scopes: ['assistants.read'] },
   ]);
-  assert.deepEqual(REMOTE_TOOLS.find((tool) => tool.name === 'update_assistant').securitySchemes, [
-    { type: 'oauth2', scopes: ['assistants.write'] },
-  ]);
+  for (const name of ['update_assistant', 'delete_assistant', 'get_operation']) {
+    assert.deepEqual(REMOTE_TOOLS.find((tool) => tool.name === name).securitySchemes, [
+      { type: 'oauth2', scopes: ['assistants.write'] },
+    ]);
+    assert.deepEqual(REMOTE_TOOLS.find((tool) => tool.name === name)._meta.securitySchemes, [
+      { type: 'oauth2', scopes: ['assistants.write'] },
+    ]);
+  }
   assert.equal(REMOTE_TOOLS.find((tool) => tool.name === 'get_operation').annotations.readOnlyHint, true);
   assert.equal(REMOTE_TOOLS.find((tool) => tool.name === 'delete_assistant').annotations.destructiveHint, true);
 });
@@ -482,6 +487,7 @@ test('hosted update/delete keep idempotency and null clears, then get_operation 
     });
     assert.equal(update.structuredContent.status, 'pending_confirmation');
     assert.equal(update.structuredContent.operationId, 'operation_update_1');
+    assert.equal('assistantBefore' in update.structuredContent, false);
 
     const deletion = await client.callTool({
       name: 'delete_assistant',
@@ -499,6 +505,7 @@ test('hosted update/delete keep idempotency and null clears, then get_operation 
     });
     assert.equal(completed.structuredContent.status, 'completed');
     assert.equal(completed.structuredContent.currentRevision, 'sha256:new');
+    assert.equal('assistant' in completed.structuredContent, false);
   });
 
   assert.deepEqual(calls[0].body, {
@@ -530,5 +537,29 @@ test('backend scope challenges are forwarded in MCP auth metadata without exposi
     assert.equal(result.isError, true);
     assert.deepEqual(result._meta['mcp/www_authenticate'], [upstreamChallenge]);
     assert.equal(JSON.stringify(result).includes('access-token-secret'), false);
+  });
+});
+
+test('pending-operation quota errors preserve backend details and remain retryable', async () => {
+  const fetchFn = async () => json({
+    error: 'pending_operation_limit',
+    message: 'Too many pending assistant operations.',
+  }, { status: 429 });
+  await withClient(fetchFn, async (client) => {
+    const result = await client.callTool({
+      name: 'update_assistant',
+      arguments: {
+        assistantRef: 'user_0',
+        expectedRevision: 'sha256:old',
+        requestId: 'request_update_quota',
+        patch: { instructions: 'New' },
+      },
+    });
+    assert.equal(result.isError, true);
+    assert.deepEqual(result.structuredContent.error, {
+      code: 'pending_operation_limit',
+      message: 'Too many pending assistant operations.',
+      retryable: true,
+    });
   });
 });

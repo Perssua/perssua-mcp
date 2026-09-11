@@ -16,6 +16,8 @@ All notable changes to `@perssua/mcp` are documented here.
   as operation success.
 - Redact OAuth credentials and attached knowledge-file contents from hosted
   responses while preserving editable knowledge text and file attachments.
+- Preserve hosted pending-operation quota failures as retryable structured
+  errors so clients can wait for an operation slot without losing the cause.
 - Ship the extended create-assistant fields already present in the public
   source: Notch, follow-up, summary, certainty, permanent knowledge, and a
   separate first-session goal.

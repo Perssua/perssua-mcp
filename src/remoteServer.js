@@ -169,7 +169,9 @@ const errorResult = (error) => {
     error: {
       code: error instanceof AssistantRemoteApiError ? error.code : 'internal_error',
       message: error instanceof Error ? error.message : 'The hosted Perssua MCP request failed.',
-      retryable: !(error instanceof AssistantRemoteApiError) || error.status >= 500,
+      retryable: !(error instanceof AssistantRemoteApiError)
+        || error.status === 429
+        || error.status >= 500,
     },
   };
   return {
