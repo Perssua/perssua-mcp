@@ -8,11 +8,7 @@ const readResponseText = async (response) => {
   if (Number.isFinite(declaredLength) && declaredLength > MAX_REMOTE_RESPONSE_BYTES) {
     throw new Error('Response too large');
   }
-  if (!response.body?.getReader) {
-    const text = await response.text();
-    if (Buffer.byteLength(text, 'utf8') > MAX_REMOTE_RESPONSE_BYTES) throw new Error('Response too large');
-    return text;
-  }
+  if (!response.body?.getReader) throw new Error('Response body is not streamable');
   const reader = response.body.getReader();
   const chunks = [];
   let total = 0;
@@ -227,7 +223,7 @@ export const createAssistantRemoteApi = ({
           Accept: 'application/json',
           ...(body ? { 'Content-Type': 'application/json' } : {}),
         },
-          ...(body ? { body: JSON.stringify(body) } : {}),
+        ...(body ? { body: JSON.stringify(body) } : {}),
       });
       const challenge = response.headers.get('www-authenticate') || undefined;
       let payload = {};
