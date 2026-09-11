@@ -74,6 +74,10 @@ const parseAssistantContext = (contextString) => {
     const trailing = contextString.substring(lastIndex).trim();
     if (trailing) manualText += `${manualText ? '\n\n' : ''}${trailing}`;
   }
+  // If an attachment marker did not parse cleanly, never fall back to
+  // exposing the serialized context as manual knowledge.
+  const attachmentMarkerCount = (contextString.match(/### File:/g) || []).length;
+  if (attachmentMarkerCount !== files.length) return { files, manualText: '' };
   if (files.length === 0 && contextString.trim()) manualText = contextString.trim();
   return { files, manualText };
 };

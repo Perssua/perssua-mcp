@@ -89,6 +89,7 @@ test('hosted MCP rejects a missing bearer with a discoverable OAuth challenge', 
   assert.match(challenge, /resource_metadata="https:\/\/mcp\.test\.example\/\.well-known\/oauth-protected-resource"/);
   assert.match(challenge, /error="invalid_token"/);
   assert.match(challenge, /error_description=/);
+  assert.doesNotMatch(challenge, /scope=/);
 });
 
 test('hosted remote API enforces the response cap incrementally and cancels an oversized stream', async () => {
@@ -259,6 +260,30 @@ test('hosted URL metadata keeps only origin and flags stripped paths', async () 
       { url: 'https://tools.example/', hasCredential: true },
       { url: 'https://tools.example/', hasCredential: false },
     ]);
+  });
+});
+
+test('hosted reads fail closed on malformed attachment serialization', async () => {
+  const fetchFn = async () => json({
+    assistant: {
+      id: 'user_0',
+      source: 'user',
+      name: 'Coach',
+      context: 'Manual notes\r\n### File: secret.md\r\n```\r\nprivate file contents\r\n```\r\n',
+    },
+    revision: 'sha256:one',
+    permissions: { read: true, update: true, delete: true },
+  });
+  await withClient(fetchFn, async (client) => {
+    const result = await client.callTool({
+      name: 'get_assistant',
+      arguments: { assistant: 'user_0', requestId: 'request_get_malformed_1' },
+    });
+    assert.deepEqual(result.structuredContent.assistant.knowledge, {
+      text: null,
+      files: [],
+    });
+    assert.equal(JSON.stringify(result).includes('private file contents'), false);
   });
 });
 

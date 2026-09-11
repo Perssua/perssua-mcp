@@ -30,12 +30,12 @@ export const protectedResourceMetadata = ({
 });
 
 const challengeFor = (resource, {
-  scope = 'assistants.read assistants.write',
+  scope,
   error = 'invalid_token',
   description = 'A valid Perssua OAuth access token is required.',
 } = {}) => (
   `Bearer resource_metadata="${normalizeResource(resource)}/.well-known/oauth-protected-resource", `
-  + `scope="${scope}", error="${error}", error_description="${description}"`
+  + `${scope ? `scope="${scope}", ` : ''}error="${error}", error_description="${description}"`
 );
 
 const bearerToken = (authorization) => {
