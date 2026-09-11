@@ -122,8 +122,16 @@ test('request retries are idempotent and reject requestId payload changes', () =
     now: () => new Date('2026-09-11T12:01:00.000Z'),
   });
 
-  assert.equal(writeAssistantOperationRequest(operationsDir, first).reused, false);
-  assert.equal(writeAssistantOperationRequest(operationsDir, retry).reused, true);
+  const retryNow = () => Date.parse('2026-09-11T12:01:00.000Z');
+  assert.equal(writeAssistantOperationRequest(operationsDir, first, { now: retryNow }).reused, false);
+  assert.equal(writeAssistantOperationRequest(operationsDir, retry, { now: retryNow }).reused, true);
+
+  assert.throws(
+    () => writeAssistantOperationRequest(operationsDir, retry, {
+      now: () => Date.parse('2026-09-11T12:16:00.000Z'),
+    }),
+    (error) => error.code === 'REQUEST_EXPIRED',
+  );
 
   const changed = buildAssistantOperationRequest({
     ...base,
