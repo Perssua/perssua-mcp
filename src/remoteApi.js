@@ -83,6 +83,7 @@ const parseAssistantContext = (contextString) => {
     const closingPrefix = `\n${fence}`;
     let searchAt = contentStart;
     let closingEnd = -1;
+    let nextCursor = -1;
     while (searchAt < serializedFiles.length) {
       const prefixAt = serializedFiles.indexOf(closingPrefix, searchAt);
       if (prefixAt === -1) break;
@@ -92,8 +93,14 @@ const parseAssistantContext = (contextString) => {
         continue;
       }
       const remainder = serializedFiles.slice(lineEnd);
-      if (remainder === '' || remainder.startsWith(`\n\n${marker}`)) {
+      if (!remainder.trim()) {
         closingEnd = lineEnd;
+        nextCursor = serializedFiles.length;
+        break;
+      }
+      if (remainder.startsWith(`\n\n${marker}`)) {
+        closingEnd = lineEnd;
+        nextCursor = lineEnd + 2;
         break;
       }
       // Canonical producers choose a fence longer than any run in the file.
@@ -104,8 +111,7 @@ const parseAssistantContext = (contextString) => {
     if (closingEnd === -1) return failClosed();
 
     files.push({ name, contentIncluded: false });
-    if (closingEnd === serializedFiles.length) break;
-    cursor = closingEnd + 2;
+    cursor = nextCursor;
   }
   return { files, manualText };
 };
