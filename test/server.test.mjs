@@ -285,3 +285,27 @@ test('get_operation never reports an expired receipt as pending_app', async () =
     assert.equal(result.structuredContent.error.code, 'OPERATION_EXPIRED');
   });
 });
+
+test('get_operation fails closed for a foreign or expired request without a receipt', async () => {
+  for (const [code, expected] of [
+    ['REQUEST_SCOPE_MISMATCH', 'ACCOUNT_SCOPE_MISMATCH'],
+    ['REQUEST_EXPIRED', 'OPERATION_EXPIRED'],
+  ]) {
+    await withClient({
+      resolveBridgeFn: () => BRIDGE,
+      readOperationResultFn: () => null,
+      readOperationRequestFn: () => {
+        const error = new Error(code);
+        error.code = code;
+        throw error;
+      },
+    }, async (client) => {
+      const result = await client.callTool({
+        name: 'get_operation',
+        arguments: { requestId: `request_${code.toLowerCase()}_1` },
+      });
+      assert.equal(result.isError, true);
+      assert.equal(result.structuredContent.error.code, expected);
+    });
+  }
+});

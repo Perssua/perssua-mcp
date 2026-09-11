@@ -178,6 +178,9 @@ test('hosted list/get map the backend contract and redact tokens plus knowledge-
           apiKey: 'upstream-leaked-key',
           metadata: 'Authorization: Bearer metadata-secret; client_secret=also-secret',
           hasCredential: true,
+        }, {
+          url: 'https://tools.example/with-query?token=hidden',
+          hasCredential: false,
         }],
       },
       revision: 'sha256:one',
@@ -208,6 +211,9 @@ test('hosted list/get map the backend contract and redact tokens plus knowledge-
     });
     assert.deepEqual(get.structuredContent.assistant.mcpServers, [{
       url: 'https://tools.example/mcp',
+      hasCredential: true,
+    }, {
+      url: 'https://tools.example/with-query',
       hasCredential: true,
     }]);
     const serialized = JSON.stringify(get);

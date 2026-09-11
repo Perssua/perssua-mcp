@@ -259,6 +259,56 @@ export const assistantOperationRequestExists = (operationsDir, requestId) => {
   }
 };
 
+/**
+ * Read and scope an MCP-authored request. A request is only considered
+ * pending while it belongs to the current bridge account and is within the
+ * request lifetime; otherwise callers fail closed instead of reporting a
+ * request that can never be completed in this session.
+ */
+export const readAssistantOperationRequest = (
+  operationsDir,
+  requestId,
+  { accountScope, now = Date.now } = {},
+) => {
+  let request;
+  try {
+    request = readJsonFile(
+      getOperationPath(operationsDir, ASSISTANT_OPERATION_REQUESTS_DIR, requestId),
+      ASSISTANT_OPERATION_LIMITS.requestBytes,
+    );
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+
+  if (
+    request?.version !== ASSISTANT_OPERATION_VERSION
+    || request.requestId !== requestId
+    || !['get_assistant', 'update_assistant', 'delete_assistant'].includes(request.operation)
+    || typeof request.bridgeSessionId !== 'string'
+    || !request.bridgeSessionId
+    || typeof request.accountScope !== 'string'
+    || !request.accountScope
+  ) {
+    throw new Error('Invalid assistant operation request');
+  }
+  const createdAtMs = Date.parse(request.createdAt || '');
+  if (!Number.isFinite(createdAtMs)) {
+    throw new Error('Assistant operation request has an invalid createdAt timestamp');
+  }
+  if (now() - createdAtMs > ASSISTANT_OPERATION_LIMITS.requestMaxAgeMs) {
+    const error = new Error('Assistant operation request has expired');
+    error.code = 'REQUEST_EXPIRED';
+    throw error;
+  }
+  if (!accountScope || request.accountScope !== accountScope) {
+    const error = new Error('Assistant operation request belongs to a different account scope');
+    error.code = 'REQUEST_SCOPE_MISMATCH';
+    throw error;
+  }
+  return request;
+};
+
 const isKnownStatus = (status) => ASSISTANT_OPERATION_STATUSES.includes(status);
 
 /**

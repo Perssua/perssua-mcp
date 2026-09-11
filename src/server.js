@@ -21,7 +21,7 @@ import {
   buildAssistantOperationDeepLink,
   buildAssistantOperationRequest,
   buildPendingAssistantOperationResult,
-  assistantOperationRequestExists,
+  readAssistantOperationRequest,
   readAssistantOperationResult,
   writeAssistantOperationRequest,
 } from './assistantOperations.js';
@@ -297,7 +297,7 @@ export const createPerssuaMcpServer = ({
   writeHandoffFn = writeHandoffFile,
   writeOperationRequestFn = writeAssistantOperationRequest,
   readOperationResultFn = readAssistantOperationResult,
-  operationRequestExistsFn = assistantOperationRequestExists,
+  readOperationRequestFn = readAssistantOperationRequest,
   openDeepLinkFn = openDeepLink,
   allowLaunch = true,
 } = {}) => {
@@ -667,13 +667,30 @@ export const createPerssuaMcpServer = ({
       }
       if (result) return operationResult(result);
 
-      if (operationRequestExistsFn(bridge.assistantOperationsDir, requestId)) {
-        return operationResult({
-          version: 1,
+      let request;
+      try {
+        request = readOperationRequestFn(
+          bridge.assistantOperationsDir,
           requestId,
-          status: 'pending_app',
+          { accountScope: readiness.binding.accountScope },
+        );
+      } catch (error) {
+        return buildToolFailure({
+          requestId,
+          operation: 'get_operation',
+          code: error.code === 'REQUEST_SCOPE_MISMATCH'
+            ? 'ACCOUNT_SCOPE_MISMATCH'
+            : error.code === 'REQUEST_EXPIRED'
+              ? 'OPERATION_EXPIRED'
+              : (error.code || 'INVALID_REQUEST'),
+          message: error.code === 'REQUEST_SCOPE_MISMATCH'
+            ? 'No operation details are available for the account currently authenticated in Perssua.'
+            : error.code === 'REQUEST_EXPIRED'
+              ? 'The MCP operation request has expired and is no longer pending.'
+              : error.message,
         });
       }
+      if (request) return operationResult(buildPendingAssistantOperationResult(request));
       return buildToolFailure({
         requestId,
         operation: 'get_operation',

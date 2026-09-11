@@ -98,12 +98,26 @@ const redactMcpServers = (servers) => (
       .map((server) => {
         const url = sanitizeMcpUrl(server.url);
         if (!url) return null;
+        let urlHadHiddenMaterial = false;
+        try {
+          const original = new URL(server.url);
+          urlHadHiddenMaterial = Boolean(
+            original.username
+            || original.password
+            || original.search
+            || original.hash
+          );
+        } catch {
+          return null;
+        }
         return {
           ...(typeof server.id === 'string' ? { id: server.id } : {}),
           ...(typeof server.name === 'string' ? { name: server.name } : {}),
           url,
           ...(typeof server.transport === 'string' ? { transport: server.transport } : {}),
-          hasCredential: server.hasCredential === true,
+          // A credential-bearing URL is redacted before it leaves the hosted
+          // adapter, but still needs to be surfaced as credentialed metadata.
+          hasCredential: server.hasCredential === true || urlHadHiddenMaterial,
         };
       })
       .filter(Boolean)

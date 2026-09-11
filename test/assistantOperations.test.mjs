@@ -10,6 +10,7 @@ import {
   buildAssistantOperationDeepLink,
   buildAssistantOperationRequest,
   buildPendingAssistantOperationResult,
+  readAssistantOperationRequest,
   readAssistantOperationResult,
   writeAssistantOperationRequest,
 } from '../src/assistantOperations.js';
@@ -203,6 +204,41 @@ test('results must be app-authored for the current bridge session', () => {
       now: () => Date.parse('2026-09-13T12:00:00.000Z'),
     }),
     (error) => error.code === 'RESULT_EXPIRED',
+  );
+});
+
+test('requests are scoped and expire before they can remain pending forever', () => {
+  const operationsDir = makeTempDir();
+  const request = buildAssistantOperationRequest({
+    requestId: 'request_scope_1',
+    operation: 'get_assistant',
+    bridgeSessionId: 'bridge_session_1',
+    accountScope: 'account_scope_1',
+    assistantRef: 'assistant_ref_opaque',
+    now: () => new Date('2026-09-11T12:00:00.000Z'),
+  });
+  writeAssistantOperationRequest(operationsDir, request);
+
+  assert.equal(
+    readAssistantOperationRequest(operationsDir, request.requestId, {
+      accountScope: 'account_scope_1',
+      now: () => Date.parse('2026-09-11T12:01:00.000Z'),
+    }).operation,
+    'get_assistant',
+  );
+  assert.throws(
+    () => readAssistantOperationRequest(operationsDir, request.requestId, {
+      accountScope: 'different_account',
+      now: () => Date.parse('2026-09-11T12:01:00.000Z'),
+    }),
+    (error) => error.code === 'REQUEST_SCOPE_MISMATCH',
+  );
+  assert.throws(
+    () => readAssistantOperationRequest(operationsDir, request.requestId, {
+      accountScope: 'account_scope_1',
+      now: () => Date.parse('2026-09-11T12:16:00.000Z'),
+    }),
+    (error) => error.code === 'REQUEST_EXPIRED',
   );
 });
 
