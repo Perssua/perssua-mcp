@@ -44,6 +44,9 @@ const CUSTOM_EDITABLE_FIELDS = [
 const BUILT_IN_EDITABLE_FIELDS = CUSTOM_EDITABLE_FIELDS.filter(
   (field) => field !== 'name' && field !== 'category',
 );
+const MAX_KNOWLEDGE_TEXT_CHARS = 128_000;
+const MAX_KNOWLEDGE_FILES = 20;
+const MAX_KNOWLEDGE_FILE_NAME_CHARS = 200;
 
 export class AssistantRemoteApiError extends Error {
   constructor(message, { status = 500, code = 'remote_api_error', challenge } = {}) {
@@ -116,6 +119,40 @@ const parseAssistantContext = (contextString) => {
   return { files, manualText };
 };
 
+const parseStructuredKnowledge = (knowledge) => {
+  if (!knowledge || typeof knowledge !== 'object' || Array.isArray(knowledge)) {
+    return { files: [], manualText: '' };
+  }
+  if (knowledge.text !== null && typeof knowledge.text !== 'string') {
+    return { files: [], manualText: '' };
+  }
+  if (!Array.isArray(knowledge.files)) return { files: [], manualText: '' };
+  if (
+    (typeof knowledge.text === 'string' && knowledge.text.length > MAX_KNOWLEDGE_TEXT_CHARS)
+    || knowledge.files.length > MAX_KNOWLEDGE_FILES
+  ) return { files: [], manualText: '' };
+
+  const files = [];
+  for (const file of knowledge.files) {
+    if (
+      !file
+      || typeof file !== 'object'
+      || Array.isArray(file)
+      || typeof file.name !== 'string'
+      || !file.name.trim()
+      || file.name.length > MAX_KNOWLEDGE_FILE_NAME_CHARS
+      || /[\r\n]/.test(file.name)
+    ) {
+      return { files: [], manualText: '' };
+    }
+    files.push({ name: file.name, contentIncluded: false });
+  }
+  return {
+    files,
+    manualText: typeof knowledge.text === 'string' ? knowledge.text : '',
+  };
+};
+
 const sanitizeMcpUrl = (value) => {
   try {
     const url = new URL(value);
@@ -157,7 +194,9 @@ const redactMcpServers = (servers) => (
 export const mapRemoteAssistant = (assistant, permissions = {}) => {
   const source = assistant?.source === 'user' ? 'user' : 'remote_config';
   const kind = source === 'user' ? 'custom' : 'built_in';
-  const knowledge = parseAssistantContext(String(assistant?.context || ''));
+  const knowledge = Object.prototype.hasOwnProperty.call(assistant || {}, 'knowledge')
+    ? parseStructuredKnowledge(assistant.knowledge)
+    : parseAssistantContext(String(assistant?.context || ''));
   const editableFields = permissions.update
     ? (kind === 'custom' ? CUSTOM_EDITABLE_FIELDS : BUILT_IN_EDITABLE_FIELDS)
     : [];

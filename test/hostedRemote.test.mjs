@@ -338,6 +338,66 @@ test('hosted reads preserve safe metadata when the final attachment has trailing
   });
 });
 
+test('hosted reads prefer structured redacted knowledge over ambiguous legacy context', async () => {
+  const fetchFn = async () => json({
+    assistant: {
+      id: 'user_0',
+      source: 'user',
+      name: 'Coach',
+      knowledge: {
+        text: 'Leading notes\n\nTrailing notes',
+        files: [{
+          name: 'notes.md',
+          content: 'structured body must not leak',
+          contentIncluded: true,
+        }],
+      },
+      context: 'Manual notes\n\n### File: secret.md\n```\nfirst secret\n```\nremaining secret\n```',
+    },
+    revision: 'sha256:one',
+    permissions: { read: true, update: true, delete: true },
+  });
+  await withClient(fetchFn, async (client) => {
+    const result = await client.callTool({
+      name: 'get_assistant',
+      arguments: { assistant: 'user_0', requestId: 'request_get_structured_knowledge_1' },
+    });
+    assert.deepEqual(result.structuredContent.assistant.knowledge, {
+      text: 'Leading notes\n\nTrailing notes',
+      files: [{ name: 'notes.md', contentIncluded: false }],
+    });
+    const serialized = JSON.stringify(result);
+    assert.equal(serialized.includes('structured body must not leak'), false);
+    assert.equal(serialized.includes('first secret'), false);
+    assert.equal(serialized.includes('remaining secret'), false);
+  });
+});
+
+test('hosted reads fail closed instead of downgrading malformed structured knowledge', async () => {
+  const fetchFn = async () => json({
+    assistant: {
+      id: 'user_0',
+      source: 'user',
+      name: 'Coach',
+      knowledge: { text: 'must not survive', files: [{ content: 'missing name' }] },
+      context: 'legacy fallback must not survive',
+    },
+    revision: 'sha256:one',
+    permissions: { read: true, update: true, delete: true },
+  });
+  await withClient(fetchFn, async (client) => {
+    const result = await client.callTool({
+      name: 'get_assistant',
+      arguments: { assistant: 'user_0', requestId: 'request_get_invalid_structured_1' },
+    });
+    assert.deepEqual(result.structuredContent.assistant.knowledge, {
+      text: null,
+      files: [],
+    });
+    assert.equal(JSON.stringify(result).includes('must not survive'), false);
+  });
+});
+
 test('hosted list preserves explicit and backend-fallback selection flags', async () => {
   let listCall = 0;
   const fetchFn = async () => {
