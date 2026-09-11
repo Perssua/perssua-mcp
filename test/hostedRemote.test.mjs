@@ -134,7 +134,12 @@ test('hosted list/get map the backend contract and redact tokens plus knowledge-
         category: 'General',
         context: 'Manual notes\n\n### File: secret.md\n```\nprivate file contents\n```',
         requireCertainty: false,
-        mcpServers: [{ url: 'https://tools.example', apiKey: 'upstream-leaked-key', hasCredential: true }],
+        mcpServers: [{
+          url: 'https://tools.example',
+          apiKey: 'upstream-leaked-key',
+          metadata: 'Authorization: Bearer metadata-secret; client_secret=also-secret',
+          hasCredential: true,
+        }],
       },
       revision: 'sha256:one',
       permissions: { read: true, update: true, delete: true },
@@ -168,10 +173,42 @@ test('hosted list/get map the backend contract and redact tokens plus knowledge-
     }]);
     const serialized = JSON.stringify(get);
     assert.equal(serialized.includes('upstream-leaked-key'), false);
+    assert.equal(serialized.includes('metadata-secret'), false);
+    assert.equal(serialized.includes('also-secret'), false);
     assert.equal(serialized.includes('private file contents'), false);
     assert.equal(serialized.includes('access-token-secret'), false);
   });
   assert.ok(calls.every((call) => call.options.headers.Authorization === 'Bearer access-token-secret'));
+});
+
+test('hosted list preserves explicit and backend-fallback selection flags', async () => {
+  let listCall = 0;
+  const fetchFn = async () => {
+    listCall += 1;
+    return json({
+      assistants: listCall === 1
+        ? [
+          { id: 'remote_0', name: 'Built in', source: 'remote_config', selected: false, permissions: { read: true } },
+          { id: 'user_0', name: 'Explicit', source: 'user', selected: true, permissions: { read: true } },
+        ]
+        : [
+          { id: 'remote_0', name: 'Fallback', source: 'remote_config', selected: true, permissions: { read: true } },
+          { id: 'user_0', name: 'Other', source: 'user', selected: false, permissions: { read: true } },
+        ],
+    });
+  };
+  await withClient(fetchFn, async (client) => {
+    const explicit = await client.callTool({ name: 'list_assistants', arguments: {} });
+    assert.deepEqual(explicit.structuredContent.assistants.map(({ id, selected }) => ({ id, selected })), [
+      { id: 'remote_0', selected: false },
+      { id: 'user_0', selected: true },
+    ]);
+    const fallback = await client.callTool({ name: 'list_assistants', arguments: {} });
+    assert.deepEqual(fallback.structuredContent.assistants.map(({ id, selected }) => ({ id, selected })), [
+      { id: 'remote_0', selected: true },
+      { id: 'user_0', selected: false },
+    ]);
+  });
 });
 
 test('hosted update/delete keep idempotency and null clears, then get_operation uses operation id', async () => {

@@ -60,7 +60,6 @@ const redactMcpServers = (servers) => (
         ...(typeof server.name === 'string' ? { name: server.name } : {}),
         url: server.url,
         ...(typeof server.transport === 'string' ? { transport: server.transport } : {}),
-        ...(typeof server.metadata === 'string' ? { metadata: server.metadata } : {}),
         hasCredential: server.hasCredential === true,
       }))
     : []
@@ -106,7 +105,7 @@ const mapRosterEntry = (entry) => {
     assistantRef: String(entry?.id || ''),
     name: String(entry?.name || ''),
     kind,
-    selected: false,
+    selected: entry?.selected === true,
     revision: String(entry?.revision || ''),
     permissions: {
       read: permissions.read === true,
