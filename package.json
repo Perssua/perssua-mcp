@@ -29,6 +29,7 @@
   "scripts": {
     "start": "node bin/perssua-mcp.js",
     "start:http": "node bin/perssua-mcp.js --http",
+    "start:hosted": "node bin/perssua-mcp.js --hosted",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {

@@ -3,7 +3,9 @@
 Lets MCP-capable AI apps (Claude Desktop, Claude Code, ChatGPT developer-mode
 connectors, Grok connectors, and any other MCP client) start a **Perssua
 session** with a configured assistant and context (free text + attached text
-files), directly from a conversation.
+files), directly from a conversation. Version 0.2 also provides a separate
+OAuth-protected hosted mode for account-scoped assistant reads and
+confirmation-gated updates/deletes while the desktop is offline.
 
 ```
 Claude / ChatGPT / Grok ──(MCP tool call)──▶ perssua-mcp
@@ -32,7 +34,18 @@ node bin/perssua-mcp.js
 
 # Streamable-HTTP endpoint on http://127.0.0.1:8433/mcp
 node bin/perssua-mcp.js --http 8433
+
+# Public remote-only handler, normally behind your hosting platform's TLS proxy
+node bin/perssua-mcp.js --hosted 8434
 ```
+
+`--hosted` exposes only `list_assistants`, `get_assistant`,
+`update_assistant`, `delete_assistant`, and `get_operation`. It never loads or
+exposes the local bridge, filesystem, session-handoff, or launcher tools. The
+canonical resource is `https://mcp.perssua.com`, with its MCP endpoint at
+`/mcp` and OAuth protected-resource metadata at
+`/.well-known/oauth-protected-resource`. Source availability does not mean the
+public resource is deployed.
 
 ## Tools
 
@@ -55,6 +68,11 @@ There is also one MCP prompt, `new_assistant` — a guided interview (goal → s
 Existing-assistant operations are asynchronous because the Perssua app owns
 authentication, permission checks, confirmation, persistence, and final
 read-back. A request file or opened deep link is never reported as success.
+
+In hosted mode, reads come from the OAuth subject's account. Updates/deletes
+return `pending_confirmation` plus an `operationId`; pass that id as
+`get_operation.requestId`. Only the same OAuth token family can read the
+result, and only the matching signed-in desktop account can approve it.
 
 1. Call `list_assistants`, then `get_assistant` with a unique `requestId`.
 2. Follow pending states with `get_operation` using the same id.
@@ -86,6 +104,10 @@ message before the server writes an unsupported request.
 | `PERSSUA_USER_DATA_DIR` | Override the app's user-data directory (defaults to the bridge file, then platform defaults). |
 | `PERSSUA_MCP_SOURCE` | Default source tag stamped on sessions (`claude`, `chatgpt`, `grok`, …). |
 | `PERSSUA_LAUNCH_URL` | Hosted launcher page (e.g. `https://perssua.com/launch`) used by `create_session_link` to produce https links that chat UIs reliably render. |
+| `ASSISTANT_REMOTE_RESOURCE` | Canonical public HTTPS resource/audience (default `https://mcp.perssua.com`). |
+| `ASSISTANT_REMOTE_ISSUER` | OAuth authorization-server issuer. |
+| `ASSISTANT_REMOTE_API_URL` | Account-scoped assistant API base URL. |
+| `PERSSUA_MCP_HOST` | Hosted-mode listen address (default `0.0.0.0`; TLS is normally terminated by the platform). |
 
 ## Security model
 
@@ -103,6 +125,9 @@ message before the server writes an unsupported request.
   account-bound. `get_operation` does not disclose old-account results.
 - A `requestId` is idempotent only for an exact logical retry. Reuse with a
   different operation, target, revision, patch, or account scope fails closed.
+- Hosted mode requires Bearer auth on every MCP request, declares
+  `assistants.read`/`assistants.write` per tool, forwards OAuth challenges, and
+  returns neither stored MCP credentials nor attached knowledge-file contents.
 
 ## Tests
 
@@ -116,18 +141,22 @@ Full policy: https://perssua.com/privacy
 
 What this MCP server does with data, specifically:
 
-- **Collection**: the server runs entirely on the user's machine. It reads the
+- **Collection (local mode)**: the server runs entirely on the user's machine. It reads the
   Perssua integration bridge (`~/.perssua/bridge.json`), the metadata-only
   assistants roster, app-authored operation receipts, and — when requested — local
   text files the user chose to attach. Tool arguments (prompt, context,
   assistant spec) come from the MCP client.
-- **Usage and storage**: session/create payloads and assistant-operation
+- **Usage and storage (local mode)**: session/create payloads and assistant-operation
   requests are written only inside directories advertised by the local app.
   The app consumes requests, writes scoped status receipts, and enforces
   retention. The server keeps no database or separate content log.
-- **Third-party sharing**: none. The server makes no network requests; data
-  flows only between the MCP client and the local Perssua app. Session content
-  handled by the Perssua app itself is covered by the policy linked above.
+- **Hosted mode**: the server forwards the OAuth bearer and requested payload
+  only to Perssua's account-scoped backend and stores neither. Read results
+  redact credentials and attached-file contents; mutations still need desktop
+  confirmation.
+- **Third-party sharing**: local mode makes no network requests. Hosted mode
+  sends the scoped request only to the configured Perssua assistant backend.
+  Session content handled by Perssua is covered by the policy linked above.
 - **Retention**: nothing is retained by this server. Unconsumed handoff files
   are deleted by the app after 15 minutes.
 - **Contact**: help@perssua.com
