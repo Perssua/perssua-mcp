@@ -216,7 +216,11 @@ const requestIdentity = (request) => JSON.stringify(stableValue({
  * Write a request once. Retrying the exact logical requestId + payload is
  * idempotent; reusing it for a different payload fails closed.
  */
-export const writeAssistantOperationRequest = (operationsDir, request) => {
+export const writeAssistantOperationRequest = (
+  operationsDir,
+  request,
+  { now = Date.now } = {},
+) => {
   const requestPath = getOperationPath(
     operationsDir,
     ASSISTANT_OPERATION_REQUESTS_DIR,
@@ -242,6 +246,15 @@ export const writeAssistantOperationRequest = (operationsDir, request) => {
       const conflict = new Error('requestId was already used for a different operation payload');
       conflict.code = 'REQUEST_ID_REUSED';
       throw conflict;
+    }
+    const createdAtMs = Date.parse(existing.createdAt || '');
+    if (!Number.isFinite(createdAtMs)) {
+      throw new Error('Assistant operation request has an invalid createdAt timestamp');
+    }
+    if (now() - createdAtMs > ASSISTANT_OPERATION_LIMITS.requestMaxAgeMs) {
+      const expired = new Error('Assistant operation request has expired');
+      expired.code = 'REQUEST_EXPIRED';
+      throw expired;
     }
     return { requestPath, reused: true };
   }
