@@ -82,11 +82,14 @@ const sanitizeMcpUrl = (value) => {
   try {
     const url = new URL(value);
     if (!['http:', 'https:'].includes(url.protocol)) return undefined;
-    url.username = '';
-    url.password = '';
-    url.search = '';
-    url.hash = '';
-    return url.toString();
+    const redacted = Boolean(
+      url.username
+      || url.password
+      || (url.pathname && url.pathname !== '/')
+      || url.search
+      || url.hash
+    );
+    return { url: `${url.origin}/`, redacted };
   } catch {
     return undefined;
   }
@@ -97,28 +100,16 @@ const redactMcpServers = (servers) => (
     ? servers
       .filter((server) => server && typeof server === 'object' && typeof server.url === 'string')
       .map((server) => {
-        const url = sanitizeMcpUrl(server.url);
-        if (!url) return null;
-        let urlHadHiddenMaterial = false;
-        try {
-          const original = new URL(server.url);
-          urlHadHiddenMaterial = Boolean(
-            original.username
-            || original.password
-            || original.search
-            || original.hash
-          );
-        } catch {
-          return null;
-        }
+        const sanitizedUrl = sanitizeMcpUrl(server.url);
+        if (!sanitizedUrl) return null;
         return {
           ...(typeof server.id === 'string' ? { id: server.id } : {}),
           ...(typeof server.name === 'string' ? { name: server.name } : {}),
-          url,
+          url: sanitizedUrl.url,
           ...(typeof server.transport === 'string' ? { transport: server.transport } : {}),
           // A credential-bearing URL is redacted before it leaves the hosted
           // adapter, but still needs to be surfaced as credentialed metadata.
-          hasCredential: server.hasCredential === true || urlHadHiddenMaterial,
+          hasCredential: server.hasCredential === true || sanitizedUrl.redacted,
         };
       })
       .filter(Boolean)

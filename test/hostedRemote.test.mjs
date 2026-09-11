@@ -213,10 +213,10 @@ test('hosted list/get map the backend contract and redact tokens plus knowledge-
       files: [{ name: 'secret.md', contentIncluded: false }],
     });
     assert.deepEqual(get.structuredContent.assistant.mcpServers, [{
-      url: 'https://tools.example/mcp',
+      url: 'https://tools.example/',
       hasCredential: true,
     }, {
-      url: 'https://tools.example/with-query',
+      url: 'https://tools.example/',
       hasCredential: true,
     }]);
     const serialized = JSON.stringify(get);
@@ -226,10 +226,40 @@ test('hosted list/get map the backend contract and redact tokens plus knowledge-
     assert.equal(serialized.includes('metadata-secret'), false);
     assert.equal(serialized.includes('also-secret'), false);
     assert.equal(serialized.includes('private-config.json'), false);
+    assert.equal(serialized.includes('/mcp'), false);
     assert.equal(serialized.includes('private file contents'), false);
     assert.equal(serialized.includes('access-token-secret'), false);
   });
   assert.ok(calls.every((call) => call.options.headers.Authorization === 'Bearer access-token-secret'));
+});
+
+test('hosted URL metadata keeps only origin and flags stripped paths', async () => {
+  const fetchFn = async () => json({
+    assistant: {
+      id: 'user_0',
+      source: 'user',
+      name: 'Coach',
+      mcpServers: [
+        { url: 'https://tools.example/mcp', hasCredential: false },
+        { url: 'https://tools.example/mcp/path-secret', hasCredential: false },
+        { url: 'https://tools.example/', hasCredential: false },
+        { url: 'file:///Users/example/private-config.json', hasCredential: false },
+      ],
+    },
+    revision: 'sha256:one',
+    permissions: { read: true, update: true, delete: true },
+  });
+  await withClient(fetchFn, async (client) => {
+    const result = await client.callTool({
+      name: 'get_assistant',
+      arguments: { assistant: 'user_0', requestId: 'request_get_origin_1' },
+    });
+    assert.deepEqual(result.structuredContent.assistant.mcpServers, [
+      { url: 'https://tools.example/', hasCredential: true },
+      { url: 'https://tools.example/', hasCredential: true },
+      { url: 'https://tools.example/', hasCredential: false },
+    ]);
+  });
 });
 
 test('hosted list preserves explicit and backend-fallback selection flags', async () => {
