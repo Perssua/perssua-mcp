@@ -22,6 +22,7 @@ test('env override wins and is treated as found', () => {
   assert.equal(resolved.userDataDir, dir);
   assert.equal(resolved.handoffDir, path.join(dir, 'external-handoffs'));
   assert.equal(resolved.rosterPath, path.join(dir, 'integrations', 'assistants.json'));
+  assert.equal(resolved.assistantOperationsDir, path.join(dir, 'external-assistant-operations'));
 });
 
 test('bridge pointer file directs all paths', () => {
@@ -66,11 +67,15 @@ test('capabilities are surfaced from the bridge and gate feature support', () =>
       appVersion: '0.27.0',
       pid: process.pid,
       capabilities: ['session-start', 'session-files', 'create-assistant', 42],
+      bridgeSessionId: 'bridge_session_1',
+      accountScope: 'account_scope_1',
     }),
   );
 
   const status = getAppStatus({ homeDir, env: {} });
   assert.deepEqual(status.capabilities, ['session-start', 'session-files', 'create-assistant']);
+  assert.equal(status.bridgeSessionId, 'bridge_session_1');
+  assert.equal(status.accountScope, 'account_scope_1');
 
   const resolved = resolveBridge({ homeDir, env: {} });
   assert.equal(bridgeSupports(resolved, 'create-assistant'), true);
@@ -145,4 +150,60 @@ test('readAssistantsRoster parses the app snapshot and tolerates absence', () =>
   assert.equal(roster.available, true);
   assert.equal(roster.assistants.length, 2);
   assert.equal(roster.selectedAssistantId, 'user_0');
+});
+
+test('readAssistantsRoster v2 exposes metadata but never prompt or knowledge fields', () => {
+  const userDataDir = makeTempDir();
+  fs.mkdirSync(path.join(userDataDir, 'integrations'), { recursive: true });
+  fs.writeFileSync(
+    path.join(userDataDir, 'integrations', 'assistants.json'),
+    JSON.stringify({
+      version: 2,
+      bridgeSessionId: 'bridge_session_1',
+      accountScope: 'account_scope_1',
+      snapshotRevision: 'snapshot_revision_1',
+      assistants: [
+        {
+          id: 'user_0',
+          name: 'Coach',
+          assistantRef: 'assistant_ref_opaque',
+          kind: 'custom',
+          selected: true,
+          revision: 'assistant_revision_1',
+          permissions: {
+            read: true,
+            update: true,
+            delete: true,
+            editableFields: ['name', 'instructions', 'knowledgeText', 'sessionGoal', 42],
+          },
+          instructions: 'must not leak through roster parsing',
+          knowledge: { text: 'also private' },
+        },
+      ],
+      selectedAssistantId: 'user_0',
+      updatedAt: '2026-09-11T12:00:00.000Z',
+    }),
+  );
+
+  const roster = readAssistantsRoster({ env: { PERSSUA_USER_DATA_DIR: userDataDir } });
+  assert.equal(roster.version, 2);
+  assert.equal(roster.bridgeSessionId, 'bridge_session_1');
+  assert.equal(roster.accountScope, 'account_scope_1');
+  assert.equal(roster.snapshotRevision, 'snapshot_revision_1');
+  assert.deepEqual(roster.assistants[0], {
+    id: 'user_0',
+    name: 'Coach',
+    assistantRef: 'assistant_ref_opaque',
+    kind: 'custom',
+    selected: true,
+    revision: 'assistant_revision_1',
+    permissions: {
+      read: true,
+      update: true,
+      delete: true,
+      editableFields: ['name', 'instructions', 'knowledgeText'],
+    },
+  });
+  assert.equal('instructions' in roster.assistants[0], false);
+  assert.equal('knowledge' in roster.assistants[0], false);
 });

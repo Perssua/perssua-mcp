@@ -39,16 +39,45 @@ node bin/perssua-mcp.js --http 8433
 | Tool | What it does |
 |---|---|
 | `app_status` | Is Perssua installed / running on this machine, where, and which handoff capabilities the installed build advertises. |
-| `list_assistants` | Lists the user's assistants (name + id) from the app's roster snapshot. |
+| `list_assistants` | Lists metadata-only assistant refs, revisions, kinds, selection, and permissions. Prompts and knowledge never appear in the roster. |
+| `get_assistant` | Asks the authenticated app for one editable definition, attached-file metadata, permissions, and revision. Requires `requestId`; may return a pending status. |
+| `update_assistant` | Submits an exact `assistantRef` + `expectedRevision` + partial patch + `requestId` for in-app confirmation and persistence. |
+| `delete_assistant` | Submits revision-checked deletion of a custom assistant for in-app confirmation. Built-ins cannot be deleted. |
+| `get_operation` | Reads the app-authored status/result without exposing receipts from another authenticated account. |
 | `start_session` | Writes a handoff (assistant, prompt, context, text files, autoSubmit) and launches the app via `perssua://session/start?handoff=<id>`. Local mode only. |
 | `create_assistant` | Creates a custom assistant with its system prompt plus optional Notch, follow-up, summary, certainty, category, and permanent knowledge settings, then opens a session. `sessionGoal` stays at the top level of that first-session handoff and is never saved as assistant knowledge; it is also projected into the legacy first prompt. The handoff always includes the legacy name/instructions/category projection, so older compatible desktops create the basic assistant and ignore optional extensions. Local mode only, handoff channel only. |
 | `create_session_link` | Returns a clickable `perssua://session/start?...` link (plus an https launcher link when `PERSSUA_LAUNCH_URL` is set). For hosted/remote connectors. |
 
 There is also one MCP prompt, `new_assistant` — a guided interview (goal → style → knowledge → kickoff) that ends by calling `create_assistant`. In Claude Code it surfaces as `/mcp__perssua__new_assistant`.
 
+### Reading and changing existing assistants
+
+Existing-assistant operations are asynchronous because the Perssua app owns
+authentication, permission checks, confirmation, persistence, and final
+read-back. A request file or opened deep link is never reported as success.
+
+1. Call `list_assistants`, then `get_assistant` with a unique `requestId`.
+2. Follow pending states with `get_operation` using the same id.
+3. For changes, use the opaque `assistantRef`, latest `expectedRevision`, a
+   new `requestId`, and only the fields that should change.
+4. Treat only `completed` as persisted. On `conflict`, read again before a new
+   request. `cancelled` and `failed` are terminal.
+
+Update fields are `name`, `instructions`, `category`, `realtimePrompt`,
+`followUpPrompt`, `emailPrompt`, `requireCertainty`, and `knowledgeText`.
+Omitted fields stay unchanged. `null` explicitly restores defaults for
+nullable fields; name/instructions cannot be blank or cleared. Knowledge text
+edits preserve attached files, and get results return file metadata only.
+Session goals, first prompts, session context, and file mutation are rejected.
+
 ### Version compatibility
 
 The app advertises its handoff capabilities in `~/.perssua/bridge.json` (`capabilities`, e.g. `["session-start", "session-files", "create-assistant", "create-assistant-extended-prompts"]`). `create_assistant` refuses only when the installed build cannot create assistants at all. Its v1 handoff projection always contains `newAssistant.name`, `newAssistant.instructions`, and optional `newAssistant.category`; optional Notch/follow-up/summary/certainty fields are additive. Older compatible desktops ignore those extensions and create the reviewed basic assistant, while newer ones apply them. `create-assistant-extended-prompts` is informational and is not required to send the backward-compatible payload. Bridges written by builds that predate the capabilities field advertise none.
+
+Existing-assistant tools require `assistant-operations-v1` plus
+`assistant-read-v1`, `assistant-update-v1`, or `assistant-delete-v1`; rich
+listing uses `assistant-roster-v2`. Older apps fail closed with an update
+message before the server writes an unsupported request.
 
 ## Environment variables
 
@@ -69,6 +98,11 @@ The app advertises its handoff capabilities in `~/.perssua/bridge.json` (`capabi
 - File attachments are read by this server (running as the user), inlined as
   text, and capped; binary files are skipped. The app never reads arbitrary
   paths from a handoff.
+- Existing definitions are returned only by an app-executed read. The roster
+  is metadata-only, and opaque refs, revisions, requests, and receipts are
+  account-bound. `get_operation` does not disclose old-account results.
+- A `requestId` is idempotent only for an exact logical retry. Reuse with a
+  different operation, target, revision, patch, or account scope fails closed.
 
 ## Tests
 
@@ -83,14 +117,14 @@ Full policy: https://perssua.com/privacy
 What this MCP server does with data, specifically:
 
 - **Collection**: the server runs entirely on the user's machine. It reads the
-  Perssua integration bridge (`~/.perssua/bridge.json`), the assistants roster
-  snapshot (names and ids only), and — when a tool call asks for it — local
+  Perssua integration bridge (`~/.perssua/bridge.json`), the metadata-only
+  assistants roster, app-authored operation receipts, and — when requested — local
   text files the user chose to attach. Tool arguments (prompt, context,
   assistant spec) come from the MCP client.
-- **Usage and storage**: payloads are written only to the Perssua app's own
-  handoff directory on the same machine, as single-use files the app deletes
-  after reading (15-minute expiry). The server keeps no database, no logs of
-  content, and no state between calls.
+- **Usage and storage**: session/create payloads and assistant-operation
+  requests are written only inside directories advertised by the local app.
+  The app consumes requests, writes scoped status receipts, and enforces
+  retention. The server keeps no database or separate content log.
 - **Third-party sharing**: none. The server makes no network requests; data
   flows only between the MCP client and the local Perssua app. Session content
   handled by the Perssua app itself is covered by the policy linked above.

@@ -21,6 +21,22 @@ export const BRIDGE_FILE_NAME = 'bridge.json';
 export const HANDOFF_DIR_NAME = 'external-handoffs';
 export const INTEGRATIONS_DIR_NAME = 'integrations';
 export const ROSTER_FILE_NAME = 'assistants.json';
+export const ASSISTANT_OPERATIONS_DIR_NAME = 'external-assistant-operations';
+
+const EDITABLE_ASSISTANT_FIELDS = new Set([
+  'name',
+  'instructions',
+  'category',
+  'realtimePrompt',
+  'followUpPrompt',
+  'emailPrompt',
+  'requireCertainty',
+  'knowledgeText',
+]);
+
+const boundedString = (value, maxChars) => (
+  typeof value === 'string' ? value.slice(0, maxChars) : ''
+);
 
 const readJsonIfExists = (filePath) => {
   try {
@@ -88,6 +104,7 @@ export const resolveBridge = ({
     userDataDir,
     handoffDir: path.join(userDataDir, HANDOFF_DIR_NAME),
     rosterPath: path.join(userDataDir, INTEGRATIONS_DIR_NAME, ROSTER_FILE_NAME),
+    assistantOperationsDir: path.join(userDataDir, ASSISTANT_OPERATIONS_DIR_NAME),
     bridge,
   });
 
@@ -104,6 +121,9 @@ export const resolveBridge = ({
     }
     if (typeof bridge.rosterPath === 'string' && bridge.rosterPath) {
       resolved.rosterPath = bridge.rosterPath;
+    }
+    if (typeof bridge.assistantOperationsDir === 'string' && bridge.assistantOperationsDir) {
+      resolved.assistantOperationsDir = bridge.assistantOperationsDir;
     }
     return resolved;
   }
@@ -147,6 +167,9 @@ export const getAppStatus = (options = {}) => {
     protocol: typeof bridge?.protocol === 'string' ? bridge.protocol : 'perssua',
     running: isPidAlive(bridge?.pid),
     bridgeUpdatedAt: typeof bridge?.updatedAt === 'string' ? bridge.updatedAt : null,
+    bridgeSessionId:
+      typeof bridge?.bridgeSessionId === 'string' ? bridge.bridgeSessionId : null,
+    accountScope: typeof bridge?.accountScope === 'string' ? bridge.accountScope : null,
     capabilities: Array.isArray(bridge?.capabilities)
       ? bridge.capabilities.filter((entry) => typeof entry === 'string')
       : [],
@@ -167,7 +190,10 @@ export const bridgeSupports = (resolvedOrStatus, capability) => {
 
 /**
  * Read the assistants roster snapshot the app keeps for external integrations.
- * Returns { available, assistants, selectedAssistantId, updatedAt }.
+ * Version 1 snapshots contain only legacy name/id entries. Version 2 remains
+ * metadata-only while adding opaque account-bound refs/revisions and explicit
+ * permissions. Full prompt/knowledge definitions are returned only by the
+ * app-executed get_assistant operation.
  */
 export const readAssistantsRoster = (options = {}) => {
   const resolved = resolveBridge(options);
@@ -179,24 +205,68 @@ export const readAssistantsRoster = (options = {}) => {
       assistants: [],
       selectedAssistantId: null,
       updatedAt: null,
+      version: null,
+      snapshotRevision: null,
+      bridgeSessionId: null,
+      accountScope: null,
       rosterPath: resolved.rosterPath,
     };
   }
 
+  const selectedAssistantId =
+    typeof roster.selectedAssistantId === 'string' ? roster.selectedAssistantId : null;
   const assistants = roster.assistants
     .filter((entry) => entry && typeof entry === 'object')
-    .map((entry) => ({
-      id: typeof entry.id === 'string' ? entry.id : String(entry.id || ''),
-      name: typeof entry.name === 'string' ? entry.name : '',
-    }))
+    .map((entry) => {
+      const id = boundedString(
+        typeof entry.id === 'string' ? entry.id : String(entry.id || ''),
+        128,
+      );
+      const permissions = entry.permissions && typeof entry.permissions === 'object'
+        ? {
+          read: entry.permissions.read === true,
+          update: entry.permissions.update === true,
+          delete: entry.permissions.delete === true,
+          editableFields: Array.isArray(entry.permissions.editableFields)
+            ? entry.permissions.editableFields.filter(
+              (field) => typeof field === 'string' && EDITABLE_ASSISTANT_FIELDS.has(field),
+            )
+            : [],
+        }
+        : null;
+      return {
+        id,
+        name: boundedString(entry.name, 200),
+        ...(typeof entry.assistantRef === 'string' && entry.assistantRef
+          ? { assistantRef: boundedString(entry.assistantRef, 256) }
+          : {}),
+        ...(entry.kind === 'custom' || entry.kind === 'built_in' ? { kind: entry.kind } : {}),
+        selected: entry.selected === true || Boolean(id && selectedAssistantId === id),
+        ...(typeof entry.revision === 'string' && entry.revision
+          ? { revision: boundedString(entry.revision, 256) }
+          : {}),
+        ...(permissions ? { permissions } : {}),
+      };
+    })
     .filter((entry) => entry.id || entry.name);
 
   return {
     available: true,
     assistants,
-    selectedAssistantId:
-      typeof roster.selectedAssistantId === 'string' ? roster.selectedAssistantId : null,
+    selectedAssistantId,
     updatedAt: typeof roster.updatedAt === 'string' ? roster.updatedAt : null,
+    version: roster.version === 2 ? 2 : 1,
+    snapshotRevision:
+      typeof roster.snapshotRevision === 'string'
+        ? boundedString(roster.snapshotRevision, 256)
+        : null,
+    bridgeSessionId:
+      typeof roster.bridgeSessionId === 'string'
+        ? boundedString(roster.bridgeSessionId, 256)
+        : null,
+    accountScope: typeof roster.accountScope === 'string'
+      ? boundedString(roster.accountScope, 256)
+      : null,
     rosterPath: resolved.rosterPath,
   };
 };

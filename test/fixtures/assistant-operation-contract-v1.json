@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "paths": {
+    "operationsDirName": "external-assistant-operations",
+    "requestsDirName": "requests",
+    "resultsDirName": "results",
+    "deepLink": "perssua://assistant/operation?request=<requestId>"
+  },
+  "capabilities": [
+    "assistant-roster-v2",
+    "assistant-read-v1",
+    "assistant-update-v1",
+    "assistant-delete-v1",
+    "assistant-operations-v1"
+  ],
+  "operations": [
+    "get_assistant",
+    "update_assistant",
+    "delete_assistant"
+  ],
+  "statuses": [
+    "pending_app",
+    "pending_authentication",
+    "pending_confirmation",
+    "completed",
+    "conflict",
+    "cancelled",
+    "failed"
+  ],
+  "assistantKinds": [
+    "custom",
+    "built_in"
+  ],
+  "editableFields": [
+    "name",
+    "instructions",
+    "category",
+    "realtimePrompt",
+    "followUpPrompt",
+    "emailPrompt",
+    "requireCertainty",
+    "knowledgeText"
+  ],
+  "limits": {
+    "requestBytes": 262144,
+    "resultBytes": 524288,
+    "requestMaxAgeMs": 900000,
+    "resultMaxAgeMs": 86400000,
+    "requestIdMinChars": 8,
+    "requestIdMaxChars": 64,
+    "sourceChars": 32,
+    "assistantRefChars": 256,
+    "revisionChars": 256,
+    "bridgeSessionIdChars": 256,
+    "accountScopeChars": 256,
+    "assistantNameChars": 200,
+    "assistantInstructionsChars": 32000,
+    "assistantCategoryChars": 64,
+    "assistantRealtimePromptChars": 32000,
+    "assistantFollowUpPromptChars": 32000,
+    "assistantEmailPromptChars": 32000,
+    "assistantKnowledgeTextChars": 128000,
+    "assistantKnowledgeFiles": 20
+  },
+  "requestIdPattern": "^[A-Za-z0-9_-]{8,64}$",
+  "request": {
+    "version": 1,
+    "requestId": "request_update_example",
+    "operation": "update_assistant",
+    "bridgeSessionId": "opaque_app_instance",
+    "accountScope": "opaque_account_scope",
+    "createdAt": "2026-09-11T12:00:00.000Z",
+    "source": "mcp",
+    "target": {
+      "assistantRef": "opaque_assistant_ref"
+    },
+    "expectedRevision": "opaque_expected_revision",
+    "patch": {
+      "followUpPrompt": "Offer two concise follow-ups.",
+      "knowledgeText": null
+    }
+  },
+  "result": {
+    "version": 1,
+    "requestId": "request_update_example",
+    "operation": "update_assistant",
+    "bridgeSessionId": "opaque_executing_app_instance",
+    "accountScope": "opaque_account_scope",
+    "status": "completed",
+    "createdAt": "2026-09-11T12:00:00.000Z",
+    "updatedAt": "2026-09-11T12:00:01.000Z",
+    "target": {
+      "assistantRef": "opaque_assistant_ref"
+    },
+    "expectedRevision": "opaque_expected_revision",
+    "currentRevision": "opaque_new_revision",
+    "assistant": {
+      "assistantRef": "opaque_assistant_ref",
+      "revision": "opaque_new_revision",
+      "kind": "custom",
+      "name": "Coach",
+      "instructions": "Be concise.",
+      "category": "General",
+      "realtimePrompt": null,
+      "followUpPrompt": "Offer two concise follow-ups.",
+      "emailPrompt": null,
+      "requireCertainty": false,
+      "knowledge": {
+        "text": null,
+        "files": [
+          {
+            "name": "playbook.md",
+            "contentIncluded": false
+          }
+        ]
+      },
+      "permissions": {
+        "read": true,
+        "update": true,
+        "delete": true,
+        "editableFields": [
+          "name",
+          "instructions",
+          "category",
+          "realtimePrompt",
+          "followUpPrompt",
+          "emailPrompt",
+          "requireCertainty",
+          "knowledgeText"
+        ]
+      }
+    }
+  },
+  "error": {
+    "code": "REVISION_CONFLICT",
+    "message": "The assistant changed after it was read.",
+    "retryable": true
+  },
+  "idempotencyFingerprintFields": [
+    "operation",
+    "accountScope",
+    "target",
+    "expectedRevision",
+    "patch"
+  ]
+}

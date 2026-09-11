@@ -16,6 +16,16 @@ import { z } from 'zod';
 
 import { bridgeSupports, getAppStatus, readAssistantsRoster, resolveBridge } from './bridge.js';
 import {
+  ASSISTANT_OPERATION_CAPABILITIES,
+  ASSISTANT_OPERATION_ID_PATTERN,
+  buildAssistantOperationDeepLink,
+  buildAssistantOperationRequest,
+  buildPendingAssistantOperationResult,
+  assistantOperationRequestExists,
+  readAssistantOperationResult,
+  writeAssistantOperationRequest,
+} from './assistantOperations.js';
+import {
   HANDOFF_LIMITS,
   buildHandoffPayload,
   buildLegacyPromptProjection,
@@ -31,8 +41,9 @@ import {
 export const SERVER_NAME = 'perssua';
 export const SERVER_VERSION = '0.1.0';
 
-const textResult = (lines, { isError = false } = {}) => ({
+const textResult = (lines, { isError = false, structuredContent } = {}) => ({
   isError,
+  ...(structuredContent ? { structuredContent } : {}),
   content: [
     {
       type: 'text',
@@ -54,12 +65,226 @@ const describeAssistants = (roster) => {
   return [
     `Assistants (${roster.assistants.length}):`,
     ...roster.assistants.map((assistant) => {
-      const selected = roster.selectedAssistantId === assistant.id ? ' (currently selected)' : '';
-      return `- ${assistant.name || '(unnamed)'} — id: ${assistant.id}${selected}`;
+      const selected = assistant.selected ? ' (currently selected)' : '';
+      const metadata = [
+        assistant.id ? `id: ${assistant.id}` : null,
+        assistant.assistantRef ? `assistantRef: ${assistant.assistantRef}` : null,
+        assistant.kind ? `kind: ${assistant.kind}` : null,
+        assistant.revision ? `revision: ${assistant.revision}` : null,
+        assistant.permissions
+          ? `permissions: ${['read', 'update', 'delete'].filter((key) => assistant.permissions[key]).join('/') || 'none'}`
+          : null,
+      ].filter(Boolean).join(', ');
+      return `- ${assistant.name || '(unnamed)'}${metadata ? ` — ${metadata}` : ''}${selected}`;
     }),
+    roster.version === 2 && roster.snapshotRevision
+      ? `Snapshot revision: ${roster.snapshotRevision}`
+      : null,
+    roster.version !== 2
+      ? 'This app exported a legacy roster. Update Perssua before reading or changing assistant definitions.'
+      : null,
     roster.updatedAt ? `Last synced: ${roster.updatedAt}` : null,
   ];
 };
+
+const getBridgeBinding = (bridge) => ({
+  bridgeSessionId:
+    typeof bridge?.bridge?.bridgeSessionId === 'string' ? bridge.bridge.bridgeSessionId : '',
+  accountScope:
+    typeof bridge?.bridge?.accountScope === 'string' ? bridge.bridge.accountScope : '',
+});
+
+const buildToolFailure = ({ requestId, operation, code, message, status = 'failed' }) => {
+  const structuredContent = {
+    version: 1,
+    ...(requestId ? { requestId } : {}),
+    ...(operation ? { operation } : {}),
+    status,
+    error: { code, message, retryable: status !== 'cancelled' },
+  };
+  return textResult([message], { isError: status !== 'pending_authentication', structuredContent });
+};
+
+const summarizeOperationResult = (result) => {
+  const lines = [
+    `requestId: ${result.requestId}`,
+    result.operation ? `operation: ${result.operation}` : null,
+    `status: ${result.status}`,
+  ];
+  if (result.status === 'pending_app') {
+    lines.push('Perssua has not completed this request yet. Use get_operation with the same requestId.');
+  } else if (result.status === 'pending_authentication') {
+    lines.push('Open Perssua and sign in; the request is waiting for authentication.');
+  } else if (result.status === 'pending_confirmation') {
+    lines.push('Perssua is waiting for the user to confirm this request in the app.');
+  } else if (result.status === 'completed') {
+    lines.push('Perssua persisted and verified the operation.');
+  } else if (result.status === 'conflict') {
+    lines.push('The target or revision is stale. Read the assistant again before retrying with a new requestId.');
+  } else if (result.status === 'cancelled') {
+    lines.push('The user cancelled the operation in Perssua.');
+  } else if (result.status === 'failed') {
+    lines.push('Perssua could not complete the operation.');
+  }
+  if (result.error?.message) lines.push(`${result.error.code || 'ERROR'}: ${result.error.message}`);
+  if (result.manualDeepLink) lines.push(`Open manually: ${result.manualDeepLink}`);
+  return lines;
+};
+
+const operationResult = (result) => textResult(summarizeOperationResult(result), {
+  isError: ['conflict', 'cancelled', 'failed'].includes(result.status),
+  structuredContent: result,
+});
+
+const resolveAssistantMetadata = (roster, reference) => {
+  if (!roster?.available || roster.version !== 2) {
+    return { code: 'APP_UPDATE_REQUIRED', error: 'A version 2 assistants roster is not available.' };
+  }
+  const query = String(reference || '').trim();
+  if (!query) return { code: 'INVALID_REQUEST', error: 'assistant is required.' };
+
+  const direct = roster.assistants.filter((assistant) => (
+    assistant.assistantRef === query || assistant.id === query
+  ));
+  if (direct.length === 1) return { assistant: direct[0] };
+  if (direct.length > 1) {
+    return { code: 'AMBIGUOUS_ASSISTANT', error: 'The assistant reference is ambiguous.' };
+  }
+
+  const normalized = query.toLocaleLowerCase();
+  const byName = roster.assistants.filter(
+    (assistant) => assistant.name.toLocaleLowerCase() === normalized,
+  );
+  if (byName.length === 1) return { assistant: byName[0] };
+  if (byName.length > 1) {
+    return {
+      code: 'AMBIGUOUS_ASSISTANT',
+      error: 'More than one assistant has that name. Use its assistantRef.',
+    };
+  }
+  return { code: 'ASSISTANT_NOT_FOUND', error: `No assistant matches "${query}".` };
+};
+
+const validateMutationMetadata = ({ roster, assistantRef, operation, patch }) => {
+  if (!roster?.available || roster.version !== 2) {
+    return { code: 'APP_UPDATE_REQUIRED', message: 'A version 2 assistants roster is not available.' };
+  }
+  const assistant = roster.assistants.find((entry) => entry.assistantRef === assistantRef);
+  if (!assistant) {
+    return { code: 'ASSISTANT_NOT_FOUND', message: 'assistantRef is not present in the current account-bound roster.' };
+  }
+  const permission = operation === 'delete_assistant' ? 'delete' : 'update';
+  if (!assistant.permissions?.[permission]) {
+    return {
+      code: 'PERMISSION_DENIED',
+      message: operation === 'delete_assistant'
+        ? 'This assistant cannot be deleted. Built-in assistants never grant delete permission.'
+        : 'This assistant does not grant update permission.',
+    };
+  }
+  if (operation === 'update_assistant') {
+    const editable = new Set(assistant.permissions.editableFields || []);
+    const blocked = Object.keys(patch || {}).filter((field) => !editable.has(field));
+    if (blocked.length > 0) {
+      return {
+        code: 'PERMISSION_DENIED',
+        message: `The current assistant permissions do not allow changing: ${blocked.join(', ')}.`,
+      };
+    }
+  }
+  return { assistant };
+};
+
+const requestIdSchema = z
+  .string()
+  .regex(ASSISTANT_OPERATION_ID_PATTERN)
+  .describe('Caller-generated idempotency key (8-64 URL-safe characters). Reuse it only for an exact retry.');
+
+const sourceSchema = z
+  .string()
+  .max(32)
+  .optional()
+  .describe('Calling product, e.g. "claude", "chatgpt", or "cursor".');
+
+const assistantPatchSchema = z.object({
+  name: z.string().min(1).max(200).optional()
+    .describe('New custom-assistant name. Omit to keep it unchanged.'),
+  instructions: z.string().min(1).max(32000).optional()
+    .describe('New system instructions. Omit to keep them unchanged.'),
+  category: z.string().min(1).max(64).nullable().optional()
+    .describe('New category, or null to restore the default category.'),
+  realtimePrompt: z.string().min(1).max(32000).nullable().optional()
+    .describe('New Notch realtime prompt, or null to restore the default.'),
+  followUpPrompt: z.string().min(1).max(32000).nullable().optional()
+    .describe('New follow-up prompt, or null to restore the default.'),
+  emailPrompt: z.string().min(1).max(32000).nullable().optional()
+    .describe('New email/summary prompt, or null to restore the default.'),
+  requireCertainty: z.boolean().optional()
+    .describe('Whether responses require certainty. Omit to keep it unchanged.'),
+  knowledgeText: z.string().min(1).max(128000).nullable().optional()
+    .describe('New free-text knowledge, or null to clear it. Attached knowledge files are always preserved.'),
+}).describe(
+  'Partial assistant definition. Omitted fields remain unchanged; null explicitly clears only nullable fields. Session-only fields and knowledge-file mutation are not accepted.',
+);
+
+const operationOutputSchema = z.object({
+  version: z.number().int(),
+  requestId: z.string().optional(),
+  operation: z.enum([
+    'get_assistant',
+    'update_assistant',
+    'delete_assistant',
+    'get_operation',
+  ]).optional(),
+  status: z.enum([
+    'pending_app',
+    'pending_authentication',
+    'pending_confirmation',
+    'completed',
+    'conflict',
+    'cancelled',
+    'failed',
+  ]),
+  bridgeSessionId: z.string().optional(),
+  accountScope: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+  target: z.object({ assistantRef: z.string() }).passthrough().optional(),
+  expectedRevision: z.string().optional(),
+  currentRevision: z.string().optional(),
+  assistant: z.record(z.unknown()).optional(),
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+    retryable: z.boolean(),
+  }).passthrough().optional(),
+  launched: z.boolean().optional(),
+  requestReused: z.boolean().optional(),
+  launchError: z.string().optional(),
+  manualDeepLink: z.string().optional(),
+}).passthrough();
+
+const listAssistantsOutputSchema = z.object({
+  version: z.number().int().nullable(),
+  available: z.boolean(),
+  selectedAssistantId: z.string().nullable(),
+  snapshotRevision: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+  assistants: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    assistantRef: z.string().optional(),
+    kind: z.enum(['custom', 'built_in']).optional(),
+    selected: z.boolean(),
+    revision: z.string().optional(),
+    permissions: z.object({
+      read: z.boolean(),
+      update: z.boolean(),
+      delete: z.boolean(),
+      editableFields: z.array(z.string()),
+    }).optional(),
+  })),
+});
 
 /**
  * Create the MCP server instance. `options` lets tests inject fs/spawn-free
@@ -70,10 +295,127 @@ export const createPerssuaMcpServer = ({
   getAppStatusFn = getAppStatus,
   readRosterFn = readAssistantsRoster,
   writeHandoffFn = writeHandoffFile,
+  writeOperationRequestFn = writeAssistantOperationRequest,
+  readOperationResultFn = readAssistantOperationResult,
+  operationRequestExistsFn = assistantOperationRequestExists,
   openDeepLinkFn = openDeepLink,
   allowLaunch = true,
 } = {}) => {
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
+
+  const requireOperationBridge = ({ bridge, capability, requestId, operation }) => {
+    if (!bridge.found) {
+      return buildToolFailure({
+        requestId,
+        operation,
+        code: 'APP_NOT_INSTALLED',
+        message: 'Perssua is not installed or has not been opened yet. Install it from https://perssua.com, open it once, and retry.',
+      });
+    }
+    if (
+      !bridgeSupports(bridge, ASSISTANT_OPERATION_CAPABILITIES.operations)
+      || !bridgeSupports(bridge, capability)
+    ) {
+      return buildToolFailure({
+        requestId,
+        operation,
+        code: 'APP_UPDATE_REQUIRED',
+        message: 'This Perssua build does not advertise the assistant-management capability required by this tool. Update the app, open it once, and retry.',
+      });
+    }
+    const binding = getBridgeBinding(bridge);
+    if (!binding.accountScope) {
+      return buildToolFailure({
+        requestId,
+        operation,
+        code: 'AUTHENTICATION_REQUIRED',
+        message: 'Perssua is not currently advertising an authenticated account. Open the app, sign in, and retry with the same requestId.',
+        status: 'pending_authentication',
+      });
+    }
+    if (!binding.bridgeSessionId) {
+      return buildToolFailure({
+        requestId,
+        operation,
+        code: 'APP_NOT_READY',
+        message: 'Perssua has not finished initializing its assistant-management bridge. Open the app and retry.',
+      });
+    }
+    return { binding };
+  };
+
+  const submitAssistantOperation = async ({
+    operation,
+    capability,
+    requestId,
+    assistantRef,
+    expectedRevision,
+    patch,
+    source,
+  }) => {
+    const bridge = resolveBridgeFn();
+    const readiness = requireOperationBridge({ bridge, capability, requestId, operation });
+    if (!readiness.binding) return readiness;
+
+    let request;
+    let writeResult;
+    try {
+      request = buildAssistantOperationRequest({
+        requestId,
+        operation,
+        ...readiness.binding,
+        assistantRef,
+        expectedRevision,
+        patch,
+        source: source || process.env.PERSSUA_MCP_SOURCE || 'mcp',
+      });
+      writeResult = writeOperationRequestFn(bridge.assistantOperationsDir, request);
+    } catch (error) {
+      return buildToolFailure({
+        requestId,
+        operation,
+        code: error.code || 'INVALID_REQUEST',
+        message: error.message,
+        status: error.code === 'REQUEST_ID_REUSED' ? 'conflict' : 'failed',
+      });
+    }
+
+    const deepLink = buildAssistantOperationDeepLink(requestId, {
+      protocol: bridge.bridge?.protocol || 'perssua',
+    });
+    let launched = false;
+    let launchError = null;
+    if (allowLaunch) {
+      try {
+        launched = await openDeepLinkFn(deepLink);
+      } catch (error) {
+        launchError = error.message;
+      }
+    }
+
+    try {
+      const result = readOperationResultFn(
+        bridge.assistantOperationsDir,
+        requestId,
+        { accountScope: readiness.binding.accountScope },
+      );
+      if (result) return operationResult(result);
+    } catch (error) {
+      return buildToolFailure({
+        requestId,
+        operation,
+        code: error.code || 'INVALID_RESULT',
+        message: error.message,
+      });
+    }
+
+    return operationResult(buildPendingAssistantOperationResult(request, {
+      launched,
+      requestReused: writeResult.reused,
+      ...(launchError ? { launchError } : {}),
+      manualDeepLink: deepLink,
+    }));
+  };
 
   server.registerTool(
     'app_status',
@@ -105,13 +447,235 @@ export const createPerssuaMcpServer = ({
     {
       title: 'List Perssua assistants',
       description:
-        "List the user's configured Perssua assistants (name and id) so a session can be started with the right one.",
+        "List the user's configured Perssua assistants and account-bound metadata. Version 2 rosters include opaque assistantRef/revision tokens and explicit read/update/delete permissions, but never prompts or knowledge.",
       inputSchema: {},
+      outputSchema: listAssistantsOutputSchema,
       annotations: { title: 'List Perssua assistants', readOnlyHint: true, openWorldHint: false },
     },
     async () => {
       const roster = readRosterFn();
-      return textResult(describeAssistants(roster));
+      return textResult(describeAssistants(roster), {
+        structuredContent: {
+          version: roster.version,
+          available: roster.available,
+          selectedAssistantId: roster.selectedAssistantId,
+          snapshotRevision: roster.snapshotRevision,
+          updatedAt: roster.updatedAt,
+          assistants: roster.assistants,
+        },
+      });
+    },
+  );
+
+  server.registerTool(
+    'get_assistant',
+    {
+      title: 'Read a Perssua assistant',
+      description:
+        'Ask the authenticated Perssua app for the current editable definition, permissions, attached-file metadata, and account-bound revision of one assistant. Accepts an assistantRef, current id, or unique exact name from list_assistants. This never reads private app storage directly.',
+      inputSchema: {
+        assistant: z.string().min(1).max(256)
+          .describe('Opaque assistantRef (preferred), current id, or unique exact assistant name from list_assistants.'),
+        requestId: requestIdSchema,
+        source: sourceSchema,
+      },
+      outputSchema: operationOutputSchema,
+      annotations: {
+        title: 'Read a Perssua assistant',
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ assistant, requestId, source }) => {
+      const roster = readRosterFn();
+      const resolved = resolveAssistantMetadata(roster, assistant);
+      if (!resolved.assistant) {
+        return buildToolFailure({
+          requestId,
+          operation: 'get_assistant',
+          code: resolved.code,
+          message: resolved.error,
+        });
+      }
+      if (!resolved.assistant.permissions?.read) {
+        return buildToolFailure({
+          requestId,
+          operation: 'get_assistant',
+          code: 'PERMISSION_DENIED',
+          message: 'This assistant is not readable through the current Perssua integration permissions.',
+        });
+      }
+      return submitAssistantOperation({
+        operation: 'get_assistant',
+        capability: ASSISTANT_OPERATION_CAPABILITIES.read,
+        requestId,
+        assistantRef: resolved.assistant.assistantRef,
+        source,
+      });
+    },
+  );
+
+  server.registerTool(
+    'update_assistant',
+    {
+      title: 'Update a Perssua assistant',
+      description:
+        'Submit a revision-checked assistant patch for confirmation and persistence in the authenticated Perssua app. Use assistantRef and expectedRevision from get_assistant/list_assistants. Omitted fields stay unchanged; null clears nullable fields. knowledgeText changes preserve attached files.',
+      inputSchema: {
+        assistantRef: z.string().min(1).max(256)
+          .describe('Exact opaque assistantRef returned by list_assistants or get_assistant.'),
+        expectedRevision: z.string().min(1).max(256)
+          .describe('Exact revision returned by the latest list_assistants or get_assistant result.'),
+        patch: assistantPatchSchema,
+        requestId: requestIdSchema,
+        source: sourceSchema,
+      },
+      outputSchema: operationOutputSchema,
+      annotations: {
+        title: 'Update a Perssua assistant',
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ assistantRef, expectedRevision, patch, requestId, source }) => {
+      const validation = validateMutationMetadata({
+        roster: readRosterFn(),
+        assistantRef,
+        operation: 'update_assistant',
+        patch,
+      });
+      if (!validation.assistant) {
+        return buildToolFailure({
+          requestId,
+          operation: 'update_assistant',
+          code: validation.code,
+          message: validation.message,
+        });
+      }
+      return submitAssistantOperation({
+        operation: 'update_assistant',
+        capability: ASSISTANT_OPERATION_CAPABILITIES.update,
+        requestId,
+        assistantRef,
+        expectedRevision,
+        patch,
+        source,
+      });
+    },
+  );
+
+  server.registerTool(
+    'delete_assistant',
+    {
+      title: 'Delete a Perssua assistant',
+      description:
+        'Submit a revision-checked deletion for confirmation and persistence in the authenticated Perssua app. Only custom assistants whose current metadata grants delete permission can be deleted; built-ins cannot be deleted.',
+      inputSchema: {
+        assistantRef: z.string().min(1).max(256)
+          .describe('Exact opaque assistantRef returned by list_assistants or get_assistant.'),
+        expectedRevision: z.string().min(1).max(256)
+          .describe('Exact revision returned by the latest list_assistants or get_assistant result.'),
+        requestId: requestIdSchema,
+        source: sourceSchema,
+      },
+      outputSchema: operationOutputSchema,
+      annotations: {
+        title: 'Delete a Perssua assistant',
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ assistantRef, expectedRevision, requestId, source }) => {
+      const validation = validateMutationMetadata({
+        roster: readRosterFn(),
+        assistantRef,
+        operation: 'delete_assistant',
+      });
+      if (!validation.assistant) {
+        return buildToolFailure({
+          requestId,
+          operation: 'delete_assistant',
+          code: validation.code,
+          message: validation.message,
+        });
+      }
+      return submitAssistantOperation({
+        operation: 'delete_assistant',
+        capability: ASSISTANT_OPERATION_CAPABILITIES.delete,
+        requestId,
+        assistantRef,
+        expectedRevision,
+        source,
+      });
+    },
+  );
+
+  server.registerTool(
+    'get_operation',
+    {
+      title: 'Get a Perssua assistant operation',
+      description:
+        'Read the latest app-authored status for a get/update/delete assistant request. Details are returned only when the receipt belongs to the account currently authenticated in Perssua.',
+      inputSchema: { requestId: requestIdSchema },
+      outputSchema: operationOutputSchema,
+      annotations: {
+        title: 'Get a Perssua assistant operation',
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ requestId }) => {
+      const bridge = resolveBridgeFn();
+      const readiness = requireOperationBridge({
+        bridge,
+        capability: ASSISTANT_OPERATION_CAPABILITIES.operations,
+        requestId,
+        operation: 'get_operation',
+      });
+      if (!readiness.binding) return readiness;
+
+      let result;
+      try {
+        result = readOperationResultFn(
+          bridge.assistantOperationsDir,
+          requestId,
+          { accountScope: readiness.binding.accountScope },
+        );
+      } catch (error) {
+        return buildToolFailure({
+          requestId,
+          operation: 'get_operation',
+          code: error.code === 'RESULT_SCOPE_MISMATCH'
+            ? 'ACCOUNT_SCOPE_MISMATCH'
+            : (error.code || 'INVALID_RESULT'),
+          message: error.code === 'RESULT_SCOPE_MISMATCH'
+            ? 'No operation details are available for the account currently authenticated in Perssua.'
+            : error.message,
+        });
+      }
+      if (result) return operationResult(result);
+
+      if (operationRequestExistsFn(bridge.assistantOperationsDir, requestId)) {
+        return operationResult({
+          version: 1,
+          requestId,
+          status: 'pending_app',
+        });
+      }
+      return buildToolFailure({
+        requestId,
+        operation: 'get_operation',
+        code: 'OPERATION_NOT_FOUND',
+        message: 'No request or app-authored receipt exists for this requestId in the current Perssua bridge.',
+      });
     },
   );
 
@@ -263,16 +827,21 @@ export const createPerssuaMcpServer = ({
           .max(64)
           .optional()
           .describe('Optional category label for the assistants library.'),
-        realtimePrompt: z.string().max(HANDOFF_LIMITS.assistantRealtimePromptChars).optional().describe('Optional complete Notch realtime prompt. Blank uses Perssua’s fallback.'),
-        followUpPrompt: z.string().max(HANDOFF_LIMITS.assistantFollowUpPromptChars).optional().describe('Optional prompt for clickable follow-up suggestions. Blank uses the default.'),
-        emailPrompt: z.string().max(HANDOFF_LIMITS.assistantEmailPromptChars).optional().describe('Optional prompt for summaries and end-of-session overview. Blank uses the default.'),
-        requireCertainty: z.boolean().optional().describe('Only reply when sufficiently certain.'),
+        realtimePrompt: z.string().max(HANDOFF_LIMITS.assistantRealtimePromptChars).optional()
+          .describe('Optional complete Notch realtime prompt. Blank uses Perssua\'s fallback.'),
+        followUpPrompt: z.string().max(HANDOFF_LIMITS.assistantFollowUpPromptChars).optional()
+          .describe('Optional prompt for clickable follow-up suggestions. Blank uses the default.'),
+        emailPrompt: z.string().max(HANDOFF_LIMITS.assistantEmailPromptChars).optional()
+          .describe('Optional prompt for summaries and end-of-session overview. Blank uses the default.'),
+        requireCertainty: z.boolean().optional()
+          .describe('Only reply when sufficiently certain.'),
         knowledge: z
           .string()
           .max(128000)
           .optional()
           .describe('Free-text knowledge stored with the assistant (background, notes, decisions).'),
-        sessionGoal: z.string().max(HANDOFF_LIMITS.sessionGoalChars).optional().describe('Goal only for this first session; it is not stored on the assistant.'),
+        sessionGoal: z.string().max(HANDOFF_LIMITS.sessionGoalChars).optional()
+          .describe('Goal only for this first session; it is not stored on the assistant.'),
         files: z
           .array(z.string())
           .max(20)
