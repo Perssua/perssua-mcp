@@ -199,11 +199,13 @@ test('hosted list preserves explicit and backend-fallback selection flags', asyn
   };
   await withClient(fetchFn, async (client) => {
     const explicit = await client.callTool({ name: 'list_assistants', arguments: {} });
+    assert.equal(explicit.structuredContent.selectedAssistantId, 'user_0');
     assert.deepEqual(explicit.structuredContent.assistants.map(({ id, selected }) => ({ id, selected })), [
       { id: 'remote_0', selected: false },
       { id: 'user_0', selected: true },
     ]);
     const fallback = await client.callTool({ name: 'list_assistants', arguments: {} });
+    assert.equal(fallback.structuredContent.selectedAssistantId, 'remote_0');
     assert.deepEqual(fallback.structuredContent.assistants.map(({ id, selected }) => ({ id, selected })), [
       { id: 'remote_0', selected: true },
       { id: 'user_0', selected: false },

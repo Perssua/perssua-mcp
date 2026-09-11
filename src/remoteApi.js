@@ -227,13 +227,16 @@ export const createAssistantRemoteApi = ({
   return {
     async listAssistants() {
       const payload = await request('/v1/assistants');
+      const assistants = Array.isArray(payload.assistants)
+        ? payload.assistants.map(mapRosterEntry)
+        : [];
       return {
         version: 2,
         available: true,
-        selectedAssistantId: null,
+        selectedAssistantId: assistants.find((assistant) => assistant.selected)?.id || null,
         snapshotRevision: null,
         updatedAt: null,
-        assistants: Array.isArray(payload.assistants) ? payload.assistants.map(mapRosterEntry) : [],
+        assistants,
       };
     },
 
