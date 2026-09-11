@@ -5,10 +5,11 @@ connectors, Grok connectors, and any other MCP client) start a **Perssua
 session** with a configured assistant and context (free text + attached text
 files), directly from a conversation. Version 0.2 also provides a separate
 OAuth-protected hosted mode for account-scoped assistant reads and
-confirmation-gated updates/deletes while the desktop is offline.
+confirmation-gated updates/deletes. Local clients can also read and manage
+assistants through the installed desktop app.
 
 ```
-Claude / ChatGPT / Grok ──(MCP tool call)──▶ perssua-mcp
+Local MCP client ──(MCP tool call)──▶ perssua-mcp
                                                │  writes single-use handoff JSON
                                                ▼
                     <Perssua userData>/external-handoffs/<id>.json
@@ -22,8 +23,12 @@ Claude / ChatGPT / Grok ──(MCP tool call)──▶ perssua-mcp
 ## Requirements
 
 - Node.js ≥ 18
-- The Perssua desktop app (full flavor) installed and launched at least once
-  (it writes the integration bridge at `~/.perssua/bridge.json` on startup)
+- Local mode requires the Perssua desktop app (full flavor) installed and
+  launched at least once. It writes the integration bridge at
+  `~/.perssua/bridge.json` on startup.
+- Hosted mode requires a deployed HTTPS service plus the configured Perssua
+  OAuth issuer and account-scoped assistant API. Updates and deletions remain
+  pending until the matching signed-in desktop account confirms them.
 
 ## Run
 
@@ -55,8 +60,8 @@ public resource is deployed.
 | `list_assistants` | Lists metadata-only assistant refs, revisions, kinds, selection, and permissions. Prompts and knowledge never appear in the roster. |
 | `get_assistant` | Asks the authenticated app for one editable definition, attached-file metadata, permissions, and revision. Requires `requestId`; may return a pending status. |
 | `update_assistant` | Submits an exact `assistantRef` + `expectedRevision` + partial patch + `requestId` for in-app confirmation and persistence. |
-| `delete_assistant` | Submits revision-checked deletion of a custom assistant for in-app confirmation. Built-ins cannot be deleted. |
-| `get_operation` | Reads the app-authored status/result without exposing receipts from another authenticated account. |
+| `delete_assistant` | Submits revision-checked deletion of a custom assistant for destructive confirmation. Built-ins cannot be deleted. |
+| `get_operation` | Reads the app-authored status/result without exposing receipts from another authenticated account. A written request or opened app is never reported as persistence success. |
 | `start_session` | Writes a handoff (assistant, prompt, context, text files, autoSubmit) and launches the app via `perssua://session/start?handoff=<id>`. Local mode only. |
 | `create_assistant` | Creates a custom assistant with its system prompt plus optional Notch, follow-up, summary, certainty, category, and permanent knowledge settings, then opens a session. `sessionGoal` stays at the top level of that first-session handoff and is never saved as assistant knowledge; it is also projected into the legacy first prompt. The handoff always includes the legacy name/instructions/category projection, so older compatible desktops create the basic assistant and ignore optional extensions. Local mode only, handoff channel only. |
 | `create_session_link` | Returns a clickable `perssua://session/start?...` link (plus an https launcher link when `PERSSUA_LAUNCH_URL` is set). For hosted/remote connectors. |
@@ -90,12 +95,29 @@ Session goals, first prompts, session context, and file mutation are rejected.
 
 ### Version compatibility
 
-The app advertises its handoff capabilities in `~/.perssua/bridge.json` (`capabilities`, e.g. `["session-start", "session-files", "create-assistant", "create-assistant-extended-prompts"]`). `create_assistant` refuses only when the installed build cannot create assistants at all. Its v1 handoff projection always contains `newAssistant.name`, `newAssistant.instructions`, and optional `newAssistant.category`; optional Notch/follow-up/summary/certainty fields are additive. Older compatible desktops ignore those extensions and create the reviewed basic assistant, while newer ones apply them. `create-assistant-extended-prompts` is informational and is not required to send the backward-compatible payload. Bridges written by builds that predate the capabilities field advertise none.
+The app advertises supported integration features in `~/.perssua/bridge.json`.
+The existing session and create-assistant tools keep their v1 handoff contract,
+so older compatible desktops continue to work. Assistant management additionally
+requires `assistant-roster-v2`, the matching `assistant-read-v1`,
+`assistant-update-v1`, or `assistant-delete-v1` capability, and
+`assistant-operations-v1`. If those capabilities are absent, the management
+tools return an update-the-app error without claiming success.
 
-Existing-assistant tools require `assistant-operations-v1` plus
-`assistant-read-v1`, `assistant-update-v1`, or `assistant-delete-v1`; rich
-listing uses `assistant-roster-v2`. Older apps fail closed with an update
-message before the server writes an unsupported request.
+Assistant management is asynchronous and app-owned. Tools write a request and
+open Perssua; `get_operation` then reports one of `pending_app`,
+`pending_authentication`, `pending_confirmation`, `completed`, `conflict`,
+`cancelled`, or `failed` from the app-authored receipt. Updates and deletions
+require the revision returned by `list_assistants`, preventing a stale request
+from targeting changed data. The continuously exported roster remains
+metadata-only; prompts and knowledge are returned only through an authenticated
+`get_assistant` operation.
+
+`create_assistant` still refuses only when the installed build cannot create
+assistants at all. Its v1 handoff projection always contains
+`newAssistant.name`, `newAssistant.instructions`, and optional
+`newAssistant.category`; optional Notch/follow-up/summary/certainty fields are
+additive. Older compatible desktops ignore those extensions and create the
+reviewed basic assistant, while newer ones apply them.
 
 ## Environment variables
 
@@ -145,11 +167,13 @@ What this MCP server does with data, specifically:
   Perssua integration bridge (`~/.perssua/bridge.json`), the metadata-only
   assistants roster, app-authored operation receipts, and — when requested — local
   text files the user chose to attach. Tool arguments (prompt, context,
-  assistant spec) come from the MCP client.
+  assistant spec or patch) come from the MCP client.
 - **Usage and storage (local mode)**: session/create payloads and assistant-operation
   requests are written only inside directories advertised by the local app.
-  The app consumes requests, writes scoped status receipts, and enforces
-  retention. The server keeps no database or separate content log.
+  The app validates the current account, revisions, permissions, and
+  confirmation before writing scoped results and enforcing retention. The
+  server keeps no database or separate content log and does not treat request
+  creation as successful persistence.
 - **Hosted mode**: the server forwards the OAuth bearer and requested payload
   only to Perssua's account-scoped backend and stores neither. Read results
   redact credentials and attached-file contents; mutations still need desktop

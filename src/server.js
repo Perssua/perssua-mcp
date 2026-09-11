@@ -1,14 +1,14 @@
 /**
  * Official Perssua MCP server.
  *
- * Exposes tools that let MCP clients (Claude Desktop / Claude Code, ChatGPT
- * developer-mode connectors, Grok connectors, and any other MCP-capable app)
- * start a Perssua session with a chosen assistant and context.
+ * Exposes local tools that let MCP clients manage Perssua assistants and start
+ * a Perssua session with a chosen assistant and context.
  *
  * Local mode (stdio): writes a single-use handoff file into the app's
  * external-handoffs directory and opens perssua://session/start?handoff=<id>.
- * Remote mode (HTTP): tools still work, but `create_session_link` is the
- * primary surface — it returns links the user clicks on their own machine.
+ * Local HTTP mode exposes the same tools to a client that can reach this
+ * machine. The isolated OAuth-protected hosted surface is implemented by
+ * remoteServer.js and hostedHttpTransport.js.
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -39,7 +39,7 @@ import {
 } from './deepLink.js';
 
 export const SERVER_NAME = 'perssua';
-export const SERVER_VERSION = '0.1.0';
+export const SERVER_VERSION = '0.2.0';
 
 const textResult = (lines, { isError = false, structuredContent } = {}) => ({
   isError,

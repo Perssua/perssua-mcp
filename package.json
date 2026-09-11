@@ -1,7 +1,7 @@
 {
   "name": "@perssua/mcp",
-  "version": "0.1.0",
-  "description": "Official Perssua MCP server \u2014 lets Claude, ChatGPT, Grok and other MCP clients start Perssua sessions with a configured assistant and context.",
+  "version": "0.2.0",
+  "description": "Official Perssua MCP server for local sessions and OAuth-protected assistant management.",
   "type": "module",
   "license": "MIT",
   "author": "Perssua",
@@ -21,6 +21,7 @@
     "bin",
     "src",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "engines": {

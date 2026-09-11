@@ -2,9 +2,9 @@
   "manifest_version": "0.3",
   "name": "perssua",
   "display_name": "Perssua",
-  "version": "0.1.0",
-  "description": "Start Perssua sessions with a configured assistant and context, straight from Claude.",
-  "long_description": "Connects Claude to the Perssua desktop app on this machine. Claude can check the app, list your assistants, start a session with an assistant + context + text files, create a brand-new custom assistant from a guided interview, and build clickable session links. Requires the Perssua app (https://perssua.com) installed and opened at least once.",
+  "version": "0.2.0",
+  "description": "Manage Perssua assistants and start desktop sessions from Claude.",
+  "long_description": "Connects Claude to the Perssua desktop app on this machine. Claude can check the app, list and read your assistants, request reviewed updates or deletions, inspect operation results, start a session with an assistant + context + text files, create a brand-new custom assistant from a guided interview, and build clickable session links. Requires a compatible Perssua app (https://perssua.com) installed and opened at least once.",
   "author": {
     "name": "Perssua",
     "email": "help@perssua.com",
@@ -38,6 +38,22 @@
     {
       "name": "list_assistants",
       "description": "List the user's configured Perssua assistants."
+    },
+    {
+      "name": "get_assistant",
+      "description": "Request the complete editable definition of one Perssua assistant from the running app."
+    },
+    {
+      "name": "update_assistant",
+      "description": "Request a revision-checked update to an existing Perssua assistant."
+    },
+    {
+      "name": "delete_assistant",
+      "description": "Request a revision-checked, user-confirmed deletion of a custom Perssua assistant."
+    },
+    {
+      "name": "get_operation",
+      "description": "Read the app-authored status and result for an assistant operation."
     },
     {
       "name": "start_session",
