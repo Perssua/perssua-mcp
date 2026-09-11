@@ -181,6 +181,9 @@ test('hosted list/get map the backend contract and redact tokens plus knowledge-
         }, {
           url: 'https://tools.example/with-query?token=hidden',
           hasCredential: false,
+        }, {
+          url: 'file:///Users/example/private-config.json',
+          hasCredential: false,
         }],
       },
       revision: 'sha256:one',
@@ -222,6 +225,7 @@ test('hosted list/get map the backend contract and redact tokens plus knowledge-
     assert.equal(serialized.includes('user:pass'), false);
     assert.equal(serialized.includes('metadata-secret'), false);
     assert.equal(serialized.includes('also-secret'), false);
+    assert.equal(serialized.includes('private-config.json'), false);
     assert.equal(serialized.includes('private file contents'), false);
     assert.equal(serialized.includes('access-token-secret'), false);
   });

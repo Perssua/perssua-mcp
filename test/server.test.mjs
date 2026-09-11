@@ -309,3 +309,29 @@ test('get_operation fails closed for a foreign or expired request without a rece
     });
   }
 });
+
+test('get_operation pending summaries do not expose bridge bindings', async () => {
+  await withClient({
+    resolveBridgeFn: () => BRIDGE,
+    readOperationResultFn: () => null,
+    readOperationRequestFn: () => ({
+      version: 1,
+      requestId: 'request_pending_1',
+      operation: 'update_assistant',
+      bridgeSessionId: 'bridge_session_secret',
+      accountScope: 'account_scope_secret',
+      expectedRevision: 'revision_1',
+      target: { assistantRef: 'assistant_ref_opaque' },
+    }),
+  }, async (client) => {
+    const result = await client.callTool({
+      name: 'get_operation',
+      arguments: { requestId: 'request_pending_1' },
+    });
+    assert.equal(result.structuredContent.status, 'pending_app');
+    assert.equal(result.structuredContent.operation, 'update_assistant');
+    assert.equal(result.structuredContent.expectedRevision, 'revision_1');
+    assert.equal('bridgeSessionId' in result.structuredContent, false);
+    assert.equal('accountScope' in result.structuredContent, false);
+  });
+});

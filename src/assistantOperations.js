@@ -296,14 +296,14 @@ export const readAssistantOperationRequest = (
   if (!Number.isFinite(createdAtMs)) {
     throw new Error('Assistant operation request has an invalid createdAt timestamp');
   }
-  if (now() - createdAtMs > ASSISTANT_OPERATION_LIMITS.requestMaxAgeMs) {
-    const error = new Error('Assistant operation request has expired');
-    error.code = 'REQUEST_EXPIRED';
-    throw error;
-  }
   if (!accountScope || request.accountScope !== accountScope) {
     const error = new Error('Assistant operation request belongs to a different account scope');
     error.code = 'REQUEST_SCOPE_MISMATCH';
+    throw error;
+  }
+  if (now() - createdAtMs > ASSISTANT_OPERATION_LIMITS.requestMaxAgeMs) {
+    const error = new Error('Assistant operation request has expired');
+    error.code = 'REQUEST_EXPIRED';
     throw error;
   }
   return request;
@@ -343,11 +343,6 @@ export const readAssistantOperationResult = (
   if (!Number.isFinite(updatedAtMs)) {
     throw new Error('Assistant operation result has an invalid updatedAt timestamp');
   }
-  if (now() - updatedAtMs > ASSISTANT_OPERATION_LIMITS.resultMaxAgeMs) {
-    const error = new Error('Assistant operation result has expired');
-    error.code = 'RESULT_EXPIRED';
-    throw error;
-  }
   if (
     typeof result.bridgeSessionId !== 'string'
     || !result.bridgeSessionId
@@ -356,6 +351,11 @@ export const readAssistantOperationResult = (
   ) {
     const error = new Error('Assistant operation result belongs to a different account scope');
     error.code = 'RESULT_SCOPE_MISMATCH';
+    throw error;
+  }
+  if (now() - updatedAtMs > ASSISTANT_OPERATION_LIMITS.resultMaxAgeMs) {
+    const error = new Error('Assistant operation result has expired');
+    error.code = 'RESULT_EXPIRED';
     throw error;
   }
   return result;

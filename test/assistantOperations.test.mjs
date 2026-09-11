@@ -229,7 +229,7 @@ test('requests are scoped and expire before they can remain pending forever', ()
   assert.throws(
     () => readAssistantOperationRequest(operationsDir, request.requestId, {
       accountScope: 'different_account',
-      now: () => Date.parse('2026-09-11T12:01:00.000Z'),
+      now: () => Date.parse('2026-09-11T12:16:00.000Z'),
     }),
     (error) => error.code === 'REQUEST_SCOPE_MISMATCH',
   );

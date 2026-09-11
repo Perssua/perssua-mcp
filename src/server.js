@@ -690,7 +690,18 @@ export const createPerssuaMcpServer = ({
               : error.message,
         });
       }
-      if (request) return operationResult(buildPendingAssistantOperationResult(request));
+      if (request) {
+        // Keep bridge/session bindings private in a polling summary. They are
+        // only needed by the desktop bridge and are not useful to MCP callers.
+        return operationResult({
+          version: 1,
+          requestId: request.requestId,
+          operation: request.operation,
+          status: 'pending_app',
+          ...(request.target ? { target: request.target } : {}),
+          ...(request.expectedRevision ? { expectedRevision: request.expectedRevision } : {}),
+        });
+      }
       return buildToolFailure({
         requestId,
         operation: 'get_operation',
