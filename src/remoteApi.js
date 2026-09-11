@@ -3,6 +3,37 @@ const DEFAULT_API_URL =
 const MAX_REMOTE_RESPONSE_BYTES = 2 * 1024 * 1024;
 const REMOTE_TIMEOUT_MS = 15_000;
 
+const readResponseText = async (response) => {
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_REMOTE_RESPONSE_BYTES) {
+    throw new Error('Response too large');
+  }
+  if (!response.body?.getReader) {
+    const text = await response.text();
+    if (Buffer.byteLength(text, 'utf8') > MAX_REMOTE_RESPONSE_BYTES) throw new Error('Response too large');
+    return text;
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = Buffer.from(value);
+      total += chunk.length;
+      if (total > MAX_REMOTE_RESPONSE_BYTES) {
+        await reader.cancel();
+        throw new Error('Response too large');
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, total).toString('utf8');
+};
+
 const CUSTOM_EDITABLE_FIELDS = [
   'name',
   'instructions',
@@ -51,17 +82,35 @@ const parseAssistantContext = (contextString) => {
   return { files, manualText };
 };
 
+const sanitizeMcpUrl = (value) => {
+  try {
+    const url = new URL(value);
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+};
+
 const redactMcpServers = (servers) => (
   Array.isArray(servers)
     ? servers
       .filter((server) => server && typeof server === 'object' && typeof server.url === 'string')
-      .map((server) => ({
-        ...(typeof server.id === 'string' ? { id: server.id } : {}),
-        ...(typeof server.name === 'string' ? { name: server.name } : {}),
-        url: server.url,
-        ...(typeof server.transport === 'string' ? { transport: server.transport } : {}),
-        hasCredential: server.hasCredential === true,
-      }))
+      .map((server) => {
+        const url = sanitizeMcpUrl(server.url);
+        if (!url) return null;
+        return {
+          ...(typeof server.id === 'string' ? { id: server.id } : {}),
+          ...(typeof server.name === 'string' ? { name: server.name } : {}),
+          url,
+          ...(typeof server.transport === 'string' ? { transport: server.transport } : {}),
+          hasCredential: server.hasCredential === true,
+        };
+      })
+      .filter(Boolean)
     : []
 );
 
@@ -178,9 +227,36 @@ export const createAssistantRemoteApi = ({
           Accept: 'application/json',
           ...(body ? { 'Content-Type': 'application/json' } : {}),
         },
-        ...(body ? { body: JSON.stringify(body) } : {}),
+          ...(body ? { body: JSON.stringify(body) } : {}),
       });
-    } catch {
+      const challenge = response.headers.get('www-authenticate') || undefined;
+      let payload = {};
+      let payloadInvalid = false;
+      try {
+        payload = JSON.parse(await readResponseText(response));
+      } catch {
+        // A malformed upstream error must not echo response bodies or credentials.
+        payloadInvalid = true;
+      }
+      if (response.ok && payloadInvalid) {
+        throw new AssistantRemoteApiError('The Perssua assistant service returned an invalid response.', {
+          status: 502,
+          code: 'invalid_remote_response',
+        });
+      }
+      if (!response.ok) {
+        throw new AssistantRemoteApiError(
+          typeof payload.message === 'string' ? payload.message : 'The Perssua assistant service rejected the request.',
+          {
+            status: response.status,
+            code: typeof payload.error === 'string' ? payload.error : 'remote_api_error',
+            challenge,
+          },
+        );
+      }
+      return payload;
+    } catch (error) {
+      if (error instanceof AssistantRemoteApiError) throw error;
       throw new AssistantRemoteApiError('The Perssua assistant service is unavailable.', {
         status: 503,
         code: 'remote_unavailable',
@@ -188,40 +264,6 @@ export const createAssistantRemoteApi = ({
     } finally {
       clearTimeout(timeout);
     }
-    const challenge = response.headers.get('www-authenticate') || undefined;
-    let payload = {};
-    let payloadInvalid = false;
-    try {
-      const declaredLength = Number(response.headers.get('content-length'));
-      if (Number.isFinite(declaredLength) && declaredLength > MAX_REMOTE_RESPONSE_BYTES) {
-        throw new Error('Response too large');
-      }
-      const responseText = await response.text();
-      if (Buffer.byteLength(responseText, 'utf8') > MAX_REMOTE_RESPONSE_BYTES) {
-        throw new Error('Response too large');
-      }
-      payload = JSON.parse(responseText);
-    } catch {
-      // A malformed upstream error must not echo response bodies or credentials.
-      payloadInvalid = true;
-    }
-    if (response.ok && payloadInvalid) {
-      throw new AssistantRemoteApiError('The Perssua assistant service returned an invalid response.', {
-        status: 502,
-        code: 'invalid_remote_response',
-      });
-    }
-    if (!response.ok) {
-      throw new AssistantRemoteApiError(
-        typeof payload.message === 'string' ? payload.message : 'The Perssua assistant service rejected the request.',
-        {
-          status: response.status,
-          code: typeof payload.error === 'string' ? payload.error : 'remote_api_error',
-          challenge,
-        },
-      );
-    }
-    return payload;
   };
 
   return {

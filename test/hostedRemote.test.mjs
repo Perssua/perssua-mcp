@@ -9,6 +9,7 @@ import {
   createHostedHttpHandler,
   protectedResourceMetadata,
 } from '../src/hostedHttpTransport.js';
+import { AssistantRemoteApiError, createAssistantRemoteApi } from '../src/remoteApi.js';
 import { createPerssuaRemoteMcpServer, REMOTE_TOOLS } from '../src/remoteServer.js';
 
 const callHandler = async ({ method = 'GET', url, headers = {} }) => {
@@ -90,6 +91,44 @@ test('hosted MCP rejects a missing bearer with a discoverable OAuth challenge', 
   assert.match(challenge, /error_description=/);
 });
 
+test('hosted remote API enforces the response cap incrementally and cancels an oversized stream', async () => {
+  const chunk = new Uint8Array(1024 * 1024);
+  let offset = 0;
+  let cancelled = false;
+  const response = {
+    ok: true,
+    status: 200,
+    headers: new Headers(),
+    body: {
+      getReader() {
+        return {
+          async read() {
+            if (offset >= 3) return { done: true };
+            offset += 1;
+            return { done: false, value: chunk };
+          },
+          async cancel() { cancelled = true; },
+          releaseLock() {},
+        };
+      },
+    },
+    text() {
+      throw new Error('response.text() must not be used for streamed bodies');
+    },
+  };
+  const api = createAssistantRemoteApi({
+    bearerToken: 'access-token-secret',
+    apiUrl: 'https://api.test.example',
+    fetchFn: async () => response,
+  });
+  await assert.rejects(
+    () => api.listAssistants(),
+    (error) => error instanceof AssistantRemoteApiError && error.code === 'invalid_remote_response',
+  );
+  assert.equal(cancelled, true);
+  assert.equal(offset, 3);
+});
+
 test('hosted tools expose only remote CRUD with per-tool OAuth schemes and safe annotations', async () => {
   const names = REMOTE_TOOLS.map((tool) => tool.name);
   assert.deepEqual(names, [
@@ -135,7 +174,7 @@ test('hosted list/get map the backend contract and redact tokens plus knowledge-
         context: 'Manual notes\n\n### File: secret.md\n```\nprivate file contents\n```',
         requireCertainty: false,
         mcpServers: [{
-          url: 'https://tools.example',
+          url: 'https://user:pass@tools.example/mcp?apiKey=url-secret',
           apiKey: 'upstream-leaked-key',
           metadata: 'Authorization: Bearer metadata-secret; client_secret=also-secret',
           hasCredential: true,
@@ -168,11 +207,13 @@ test('hosted list/get map the backend contract and redact tokens plus knowledge-
       files: [{ name: 'secret.md', contentIncluded: false }],
     });
     assert.deepEqual(get.structuredContent.assistant.mcpServers, [{
-      url: 'https://tools.example',
+      url: 'https://tools.example/mcp',
       hasCredential: true,
     }]);
     const serialized = JSON.stringify(get);
     assert.equal(serialized.includes('upstream-leaked-key'), false);
+    assert.equal(serialized.includes('url-secret'), false);
+    assert.equal(serialized.includes('user:pass'), false);
     assert.equal(serialized.includes('metadata-secret'), false);
     assert.equal(serialized.includes('also-secret'), false);
     assert.equal(serialized.includes('private file contents'), false);

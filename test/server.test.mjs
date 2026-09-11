@@ -264,3 +264,24 @@ test('get_operation never exposes a receipt from another account scope', async (
     assert.equal(result.structuredContent.assistant, undefined);
   });
 });
+
+test('get_operation never reports an expired receipt as pending_app', async () => {
+  await withClient({
+    resolveBridgeFn: () => BRIDGE,
+    readRosterFn: () => ROSTER,
+    readOperationResultFn: () => {
+      const error = new Error('Assistant operation result has expired');
+      error.code = 'RESULT_EXPIRED';
+      throw error;
+    },
+    operationRequestExistsFn: () => true,
+  }, async (client) => {
+    const result = await client.callTool({
+      name: 'get_operation',
+      arguments: { requestId: 'request_expired_1' },
+    });
+    assert.equal(result.isError, true);
+    assert.equal(result.structuredContent.status, 'failed');
+    assert.equal(result.structuredContent.error.code, 'OPERATION_EXPIRED');
+  });
+});

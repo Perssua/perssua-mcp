@@ -197,12 +197,12 @@ test('results must be app-authored for the current bridge session', () => {
     (error) => error.code === 'RESULT_SCOPE_MISMATCH',
   );
 
-  assert.equal(
-    readAssistantOperationResult(operationsDir, 'request_get_2', {
+  assert.throws(
+    () => readAssistantOperationResult(operationsDir, 'request_get_2', {
       accountScope: 'account_scope_1',
       now: () => Date.parse('2026-09-13T12:00:00.000Z'),
     }),
-    null,
+    (error) => error.code === 'RESULT_EXPIRED',
   );
 });
 

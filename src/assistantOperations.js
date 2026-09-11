@@ -293,7 +293,11 @@ export const readAssistantOperationResult = (
   if (!Number.isFinite(updatedAtMs)) {
     throw new Error('Assistant operation result has an invalid updatedAt timestamp');
   }
-  if (now() - updatedAtMs > ASSISTANT_OPERATION_LIMITS.resultMaxAgeMs) return null;
+  if (now() - updatedAtMs > ASSISTANT_OPERATION_LIMITS.resultMaxAgeMs) {
+    const error = new Error('Assistant operation result has expired');
+    error.code = 'RESULT_EXPIRED';
+    throw error;
+  }
   if (
     typeof result.bridgeSessionId !== 'string'
     || !result.bridgeSessionId

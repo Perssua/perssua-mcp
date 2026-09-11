@@ -655,9 +655,13 @@ export const createPerssuaMcpServer = ({
           operation: 'get_operation',
           code: error.code === 'RESULT_SCOPE_MISMATCH'
             ? 'ACCOUNT_SCOPE_MISMATCH'
+            : error.code === 'RESULT_EXPIRED'
+              ? 'OPERATION_EXPIRED'
             : (error.code || 'INVALID_RESULT'),
           message: error.code === 'RESULT_SCOPE_MISMATCH'
             ? 'No operation details are available for the account currently authenticated in Perssua.'
+            : error.code === 'RESULT_EXPIRED'
+              ? 'The app-authored operation receipt has expired and is no longer available.'
             : error.message,
         });
       }
